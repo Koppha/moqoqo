@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.data/
+.data.broken-*/
+.data.backup-*/
+.env
+*.log
+
+# Local database copies (PGlite data dirs and their backups), crash dumps
+.data*/
+*.stackdump

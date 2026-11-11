@@ -1,0 +1,134 @@
+/* Maintenance editor: form + live phone preview. */
+
+.maint-editor {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  gap: 28px;
+  align-items: start;
+}
+
+.maint-preview {
+  position: sticky;
+  top: 20px;
+  display: grid;
+  gap: 12px;
+  justify-items: center;
+}
+.preview-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+}
+.preview-head h3 {
+  font-size: 15px;
+}
+.preview-head .segmented-field {
+  margin: 0;
+}
+.maint-preview > p {
+  text-align: center;
+}
+
+/* phone frame */
+.phone {
+  margin: 0;
+  width: 260px;
+  padding: 10px;
+  border-radius: 40px;
+  background: #1c1d24;
+  box-shadow:
+    0 0 0 2px #2c2d35,
+    var(--shadow-lg);
+}
+.phone-screen {
+  position: relative;
+  height: 500px;
+  border-radius: 31px;
+  overflow: hidden;
+  background: radial-gradient(120% 70% at 50% 0%, #1b1036 0%, var(--hero) 65%);
+  color: #fff;
+  display: flex;
+  flex-direction: column;
+  padding: 0 22px;
+}
+.phone-notch {
+  position: absolute;
+  top: 8px;
+  left: 50%;
+  translate: -50% 0;
+  width: 84px;
+  height: 22px;
+  border-radius: 999px;
+  background: #000;
+}
+.phone-status {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 12px 6px 0;
+  color: #e6e7ec;
+}
+.phone-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 12px;
+}
+.phone-icon {
+  width: 76px;
+  height: 76px;
+  border-radius: 24px;
+  display: grid;
+  place-items: center;
+  background: rgba(91, 44, 159, 0.35);
+  color: #e3d4fb;
+  margin-bottom: 6px;
+}
+.phone-title {
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+.phone-message {
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: #c9cad3;
+  overflow-wrap: anywhere;
+  max-height: 170px;
+  overflow: hidden;
+}
+.phone-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  padding: 7px 12px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.1);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+.phone-brand {
+  text-align: center;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--hero-muted);
+  padding-bottom: 18px;
+}
+
+@media (max-width: 1100px) {
+  .maint-editor {
+    grid-template-columns: 1fr;
+  }
+  .maint-preview {
+    position: static;
+  }
+}

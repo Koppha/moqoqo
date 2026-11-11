@@ -1,0 +1,14 @@
+{
+  // The Moqoqo server must own localhost:4100 (and the portal localhost:5173): the apps reach it through
+  // `adb reverse` / the emulator's 10.0.2.2, which both arrive at 127.0.0.1. VS Code's automatic port forwarding
+  // grabs 127.0.0.1:<port> and breaks that, so it is off for this project, and these ports are ignored even if
+  // forwarding is switched on again.
+  "remote.autoForwardPorts": false,
+  "remote.portsAttributes": {
+    "4000": { "onAutoForward": "ignore" },
+    "4100": { "onAutoForward": "ignore" },
+    "5173": { "onAutoForward": "ignore" },
+    "8081": { "onAutoForward": "ignore" }
+  },
+  "java.compile.nullAnalysis.mode": "automatic"
+}

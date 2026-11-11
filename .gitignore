@@ -39,3 +39,10 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# Gradle caches inside local native modules
+.gradle/
+
+# Firebase service account key for push (FCM V1): uploaded to Expo, never committed.
+*firebase-adminsdk*.json
+fcm-service-account*.json

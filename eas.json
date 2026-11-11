@@ -1,0 +1,64 @@
+{
+  "cli": {
+    "version": ">= 16.0.0",
+    "appVersionSource": "remote"
+  },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk"
+      }
+    },
+    "preview": {
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk"
+      }
+    },
+    "production": {
+      "autoIncrement": true
+    },
+    "business-development": {
+      "extends": "development",
+      "env": {
+        "APP_VARIANT": "business"
+      }
+    },
+    "business-preview": {
+      "extends": "preview",
+      "env": {
+        "APP_VARIANT": "business"
+      }
+    },
+    "business-production": {
+      "extends": "preview",
+      "env": {
+        "APP_VARIANT": "business"
+      }
+    },
+    "ecosure-development": {
+      "extends": "development",
+      "env": {
+        "APP_VARIANT": "ecosure"
+      }
+    },
+    "ecosure-preview": {
+      "extends": "preview",
+      "env": {
+        "APP_VARIANT": "ecosure"
+      }
+    },
+    "ecosure-production": {
+      "extends": "production",
+      "env": {
+        "APP_VARIANT": "ecosure"
+      }
+    }
+  },
+  "submit": {
+    "production": {},
+    "ecosure-production": {}
+  }
+}
