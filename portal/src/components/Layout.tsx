@@ -13,6 +13,7 @@ const NAV: { to: string; label: string; icon: IconName }[] = [
   { to: '/analytics', label: 'Analytics', icon: 'bars' },
   { to: '/performance', label: 'Performance', icon: 'trend' },
   { to: '/retention', label: 'Retention (churn risk)', icon: 'store' },
+  { to: '/channel-map', label: 'Channel map', icon: 'pin' },
   { to: '/risk', label: 'Risk', icon: 'alert' },
   { to: '/cases', label: 'Cases (financial crime)', icon: 'file' },
   { to: '/ai-governance', label: 'AI governance', icon: 'shield' },

@@ -2550,6 +2550,42 @@ tr.clickable {
 .place-pin-off {
   opacity: 0.45;
 }
+/* Channel map: pins coloured by churn risk (Retention). */
+.channel-pin-high {
+  background: #dc2626;
+}
+.channel-pin-medium {
+  background: #ea580c;
+}
+.channel-pin-low {
+  background: #16a34a;
+}
+.channel-pin-quiet {
+  background: #6b7280;
+}
+.channel-pin-none {
+  background: #94a3b8;
+}
+.place-map-lg {
+  height: 560px;
+}
+.channel-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  align-items: center;
+  margin-top: 10px;
+}
+.channel-legend .place-pin {
+  width: 18px;
+  height: 18px;
+  font-size: 10px;
+}
+.channel-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
 .stars {
   color: #f5a524;
   letter-spacing: 1px;

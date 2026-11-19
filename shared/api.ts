@@ -2687,6 +2687,36 @@ export interface PlaceBody {
 /** Lesotho's bounding box: places outside it are refused (a swapped latitude and longitude, usually). */
 export const LESOTHO_BOUNDS = { minLat: -30.7, maxLat: -28.5, minLng: 27.0, maxLng: 29.5 }
 
+// ---------- channel map (portal: Channel map) ----------
+//
+// Every agent and merchant (the channel) on one staff map, coloured by churn risk. Where a pin comes from: a location
+// staff set for that wallet ('set'), else their Find us place matched by code or number ('place'). Staff-only: the
+// customer app's Find us still shows only Places.
+//
+// GET    /admin/v1/channel-map                        → ChannelMap
+// PUT    /admin/v1/channel-map/:userId/location  ChannelLocationBody → ChannelUser (admin role; audited)
+// DELETE /admin/v1/channel-map/:userId/location  → 204 (back to the Find us place, if any)
+
+export interface ChannelUser {
+  user: PublicUser & { code: string | null }
+  status: 'active' | 'suspended'
+  location: { lat: number; lng: number; address: string | null; source: 'set' | 'place' } | null
+  /** Latest churn score (Retention); null before the first run. */
+  churn: { score: number; band: ChurnBand } | null
+  lastTransactionAt: string | null
+  /** Transactions in the last 30 days. */
+  tx30: number
+  balance: number
+}
+
+export interface ChannelMap {
+  users: ChannelUser[]
+  located: number
+  unlocated: number
+}
+
+export interface ChannelLocationBody { lat: number; lng: number; address?: string }
+
 /** Metres between two points (haversine). */
 export function distanceMetres(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
   const R = 6371000

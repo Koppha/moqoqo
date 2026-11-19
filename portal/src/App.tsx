@@ -17,6 +17,7 @@ import { AnalyticsPage } from './pages/Analytics'
 import { PerformancePage } from './pages/Performance'
 import { RiskPage } from './pages/Risk'
 import { RetentionPage } from './pages/Retention'
+import { ChannelMapPage } from './pages/ChannelMap'
 import { CasesPage } from './pages/Cases'
 import { AiGovernancePage } from './pages/AiGovernance'
 import { SignInMonitorPage } from './pages/SignInMonitor'
@@ -70,6 +71,7 @@ export function AppRoutes() {
         <Route path="performance" element={<PerformancePage />} />
         <Route path="risk" element={<RiskPage />} />
         <Route path="retention" element={<RetentionPage />} />
+        <Route path="channel-map" element={<ChannelMapPage />} />
         <Route path="cases" element={<CasesPage />} />
         <Route path="cases/:id" element={<CasesPage />} />
         <Route path="ai-governance" element={<AiGovernancePage />} />

@@ -4,7 +4,7 @@
 import 'leaflet/dist/leaflet.css'
 import L from 'leaflet'
 import { useEffect, useRef } from 'react'
-import type { Place, PlaceKind } from '../../../shared/api'
+import type { ChannelUser, ChurnBand, Place, PlaceKind } from '../../../shared/api'
 
 /** Maseru, where most places are. */
 export const MASERU = { lat: -29.315, lng: 27.485 }
@@ -113,3 +113,60 @@ export function LocationPicker({ value, onPick }: { value: { lat: number; lng: n
 
   return <div ref={node} className="place-map place-map-sm" role="region" aria-label="Pick the location on the map" />
 }
+
+/** What a channel pin's colour shows: churn risk (Retention), or agent vs merchant. */
+export type ChannelColour = 'risk' | 'role'
+
+const channelPin = (u: ChannelUser, colour: ChannelColour) =>
+  L.divIcon({
+    className: `place-pin ${colour === 'role' ? `place-pin-${u.user.role}` : `channel-pin-${u.churn?.band ?? 'none'}`}${u.status === 'suspended' ? ' place-pin-off' : ''}`,
+    html: u.user.role === 'agent' ? 'A' : 'M',
+    iconSize: [26, 26],
+    iconAnchor: [13, 13],
+  })
+
+/** Every located agent and merchant; the view fits them all the first time, then stays where staff moved it. */
+export function ChannelMapView({ users, colour, onSelect }: { users: ChannelUser[]; colour: ChannelColour; onSelect: (u: ChannelUser) => void }) {
+  const node = useRef<HTMLDivElement>(null)
+  const map = useRef<L.Map | null>(null)
+  const layer = useRef<L.LayerGroup | null>(null)
+  const fitted = useRef(false)
+  const onSelectRef = useRef(onSelect)
+  onSelectRef.current = onSelect
+
+  useEffect(() => {
+    if (!node.current) return
+    map.current = baseMap(node.current, MASERU, 12)
+    layer.current = L.layerGroup().addTo(map.current)
+    return () => {
+      map.current?.remove()
+      map.current = null
+    }
+  }, [])
+
+  useEffect(() => {
+    const group = layer.current
+    const m = map.current
+    if (!group || !m) return
+    group.clearLayers()
+    const points: L.LatLngTuple[] = []
+    for (const u of users) {
+      if (!u.location) continue
+      const name = u.user.businessName ?? u.user.name
+      const risk = u.churn ? ` · ${BAND_WORD[u.churn.band]} (${u.churn.score})` : ''
+      points.push([u.location.lat, u.location.lng])
+      L.marker([u.location.lat, u.location.lng], { icon: channelPin(u, colour), title: name, keyboard: true })
+        .bindTooltip(`${escapeHtml(name)}${escapeHtml(risk)}`)
+        .on('click', () => onSelectRef.current(u))
+        .addTo(group)
+    }
+    if (!fitted.current && points.length) {
+      m.fitBounds(L.latLngBounds(points), { padding: [40, 40], maxZoom: 14 })
+      fitted.current = true
+    }
+  }, [users, colour])
+
+  return <div ref={node} className="place-map place-map-lg" role="region" aria-label="Map of agents and merchants" />
+}
+
+const BAND_WORD: Record<ChurnBand, string> = { high: 'High risk', medium: 'Medium risk', low: 'Low risk', quiet: 'Gone quiet' }

@@ -29,6 +29,7 @@ import { createStopOrderSweeper } from './services/stopOrders'
 import { createInsightSweeper } from './services/insights'
 import { createChurnSweeper } from './services/churn'
 import { retentionRoutes } from './routes/retention'
+import { channelMapRoutes } from './routes/channelMap'
 import { stopOrderRoutes } from './routes/stopOrders'
 import { createLoanSweeper } from './services/societyLoans'
 import { createSplitSweeper } from './services/splits'
@@ -275,6 +276,7 @@ export async function buildApp(opts: { config: Config; db: Db; logger?: boolean 
   await performanceRoutes(app, ctx)
   await aiRiskRoutes(app, ctx)
   await retentionRoutes(app, ctx)
+  await channelMapRoutes(app, ctx)
   await simSwapRoutes(app, ctx)
   await securityRoutes(app, ctx)
 

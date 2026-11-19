@@ -14,6 +14,9 @@ import type { BillCategory, BillCategoryBody,
   AiModelKey,
   AiModelVersion,
   AiOutcome,
+  ChannelLocationBody,
+  ChannelMap,
+  ChannelUser,
   ChurnBand,
   ChurnDetail,
   ChurnFollowupBody,
@@ -456,6 +459,12 @@ export const api = {
     versions: (key: AiModelKey) => request<AiModelVersion[]>('GET', `${A}/ai/models/${key}/versions`),
     decisions: (q: { model?: AiModelKey | ''; outcome?: AiOutcome | ''; page?: number; pageSize?: number }) =>
       request<Page<AiDecision>>('GET', `${A}/ai/decisions`, { query: { ...q } }),
+  },
+
+  channelMap: {
+    get: () => request<ChannelMap>('GET', `${A}/channel-map`),
+    setLocation: (userId: string, body: ChannelLocationBody) => request<ChannelUser>('PUT', `${A}/channel-map/${encodeURIComponent(userId)}/location`, { body }),
+    clearLocation: (userId: string) => request<void>('DELETE', `${A}/channel-map/${encodeURIComponent(userId)}/location`),
   },
 
   churn: {
