@@ -26,6 +26,7 @@ import { homeRoutes } from './routes/home'
 import { supportAdminRoutes } from './routes/support'
 import { createAtmSweeper } from './services/atm'
 import { createStopOrderSweeper } from './services/stopOrders'
+import { createInsightSweeper } from './services/insights'
 import { stopOrderRoutes } from './routes/stopOrders'
 import { createLoanSweeper } from './services/societyLoans'
 import { createSplitSweeper } from './services/splits'
@@ -67,6 +68,8 @@ export interface BuiltApp {
   intentSweeper: ReturnType<typeof createIntentSweeper>
   atmSweeper: ReturnType<typeof createAtmSweeper>
   stopOrderSweeper: ReturnType<typeof createStopOrderSweeper>
+  /** The assistant's monthly spending summaries, hourly once started. */
+  insightSweeper: ReturnType<typeof createInsightSweeper>
   splitSweeper: ReturnType<typeof createSplitSweeper>
   /** Society loan reminders and expiry, hourly once started. */
   loanSweeper: ReturnType<typeof createLoanSweeper>
@@ -149,6 +152,7 @@ export async function buildApp(opts: { config: Config; db: Db; logger?: boolean 
   const intentSweeper = createIntentSweeper(ctx, config.maintenanceTickMs)
   const atmSweeper = createAtmSweeper(ctx)
   const stopOrderSweeper = createStopOrderSweeper(ctx)
+  const insightSweeper = createInsightSweeper(ctx)
   const splitSweeper = createSplitSweeper(ctx)
   const loanSweeper = createLoanSweeper(ctx)
   ctx.onCredit = splitSweeper.onCredit
@@ -273,6 +277,7 @@ export async function buildApp(opts: { config: Config; db: Db; logger?: boolean 
     intentSweeper.stop()
     atmSweeper.stop()
     stopOrderSweeper.stop()
+    insightSweeper.stop()
     splitSweeper.stop()
     push.stop()
     loanSweeper.stop()
@@ -283,5 +288,5 @@ export async function buildApp(opts: { config: Config; db: Db; logger?: boolean 
     await ctx.notifier.idle()
   })
 
-  return { app, ctx, configWatcher, intentSweeper, atmSweeper, stopOrderSweeper, splitSweeper, loanSweeper, surveillance, push, apiMetrics }
+  return { app, ctx, configWatcher, intentSweeper, atmSweeper, stopOrderSweeper, insightSweeper, splitSweeper, loanSweeper, surveillance, push, apiMetrics }
 }

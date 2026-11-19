@@ -17,8 +17,10 @@ const SCREENS: Record<AppKind, Partial<Record<AssistantScreen, Href>>> = {
     bank: '/bank',
     remit: '/remit',
     ecosure: '/ecosure',
+    insights: '/insights',
+    school: '/school',
   },
-  business: { transactions: '/transactions', my_qr: '/my-qr', receive_money: '/my-qr' },
+  business: { transactions: '/transactions', my_qr: '/my-qr', receive_money: '/my-qr', insights: '/insights' },
   ecosure: { transactions: '/transactions', ecosure: '/ecosure' },
   society: { transactions: '/transactions' },
 }

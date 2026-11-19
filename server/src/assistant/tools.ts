@@ -9,6 +9,7 @@ import { myPolicies } from '../ecosure/policies'
 import { formatM, fromCents } from '../lib/money'
 import { normalizeMsisdn } from '../lib/msisdn'
 import { postMessage } from '../services/chats'
+import { maseruMonth, spendingInsights } from '../services/insights'
 import { getTariff } from '../services/tariff'
 import { listTransactions } from '../services/transactions'
 import { getUser, type UserRow } from '../services/users'
@@ -32,7 +33,7 @@ interface ToolDef {
   run(env: ToolEnv, input: any): Promise<string>
 }
 
-const SCREENS: AssistantScreen[] = ['transactions', 'my_qr', 'receive_money', 'pay', 'money', 'split', 'topup', 'bank', 'remit', 'ecosure']
+const SCREENS: AssistantScreen[] = ['transactions', 'my_qr', 'receive_money', 'pay', 'money', 'split', 'topup', 'bank', 'remit', 'ecosure', 'insights', 'school']
 const zAmount = z.number().positive().max(MAX_TRANSACTION).refine((n) => Math.abs(Math.round(n * 100) - n * 100) < 1e-6, 'at most 2 decimals')
 
 const json = (v: unknown) => JSON.stringify(v)
@@ -223,6 +224,34 @@ export const TOOLS: Record<string, ToolDef> = {
     },
   },
 
+  get_spending: {
+    tool: {
+      name: 'get_spending',
+      description:
+        "The user's money out for one month, by category (people, shops, transport = taxis, electricity, water, school, airtime, insurance, society, cash, fees, other), " +
+        'with the month before beside each, money in, and who got the most. Months are Lesotho months. Use it for "how much did I spend on…", "where does my money go", comparisons between months.',
+      input_schema: {
+        type: 'object',
+        properties: { month: { type: 'string', description: 'YYYY-MM. Leave out for this month.' } },
+        additionalProperties: false,
+      },
+    },
+    input: z.object({ month: z.string().regex(/^\d{4}-\d{2}$/).optional() }),
+    async run(env, input: { month?: string }) {
+      const month = input.month ?? maseruMonth()
+      if (month > maseruMonth()) return 'That month has not started yet.'
+      const s = await spendingInsights(env.ctx.db, env.user.id, month)
+      return json({
+        month: s.month,
+        spent: money(s.spent),
+        spentMonthBefore: money(s.lastMonthSpent),
+        received: money(s.received),
+        categories: s.categories.map((c) => ({ category: c.category, spent: money(c.amount), monthBefore: money(c.lastMonth), payments: c.count })),
+        topPayees: s.topPayees.map((p) => ({ name: p.name, amount: money(p.amount) })),
+      })
+    },
+  },
+
   get_ecosure_products: {
     tool: {
       name: 'get_ecosure_products',
@@ -406,7 +435,7 @@ export const TOOLS: Record<string, ToolDef> = {
     tool: {
       name: 'open_screen',
       description:
-        'Show a button that opens an EcoCash Super App screen: transactions, my_qr (receive QR), receive_money, pay (scan to pay), money (payment code), split (split bill), topup (card to wallet), bank (wallet to bank), remit (send money abroad), ecosure.',
+        'Show a button that opens an EcoCash Super App screen: transactions, my_qr (receive QR), receive_money, pay (scan to pay), money (payment code), split (split bill), topup (card to wallet), bank (wallet to bank), remit (send money abroad), ecosure, insights (spending by category, month by month), school (pay school fees, ask someone to pay them, term dates in the phone calendar).',
       input_schema: {
         type: 'object',
         properties: { screen: { type: 'string', enum: SCREENS }, label: { type: 'string', description: 'Short button text, e.g. "See your payments".' } },

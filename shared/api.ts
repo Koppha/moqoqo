@@ -479,6 +479,44 @@ export interface Transaction {
   createdAt: string
 }
 
+// ---------- spending insights ----------
+//
+// GET /v1/insights?month=YYYY-MM → SpendingInsights (default: this month). Money out of the person's wallet, grouped
+// by what it was for, with the month before beside it. Months are Lesotho months (Africa/Maseru, UTC+2).
+// The EcoCash Assistant also posts last month's summary in its chat early each month, and answers questions about it.
+
+export type SpendingCategory =
+  | 'people' | 'shops' | 'transport' | 'electricity' | 'water' | 'school' | 'airtime' | 'insurance' | 'society' | 'cash' | 'fees' | 'other'
+
+export const SPENDING_CATEGORIES: SpendingCategory[] = [
+  'people', 'shops', 'transport', 'electricity', 'water', 'school', 'airtime', 'insurance', 'society', 'cash', 'fees', 'other',
+]
+
+export interface SpendingLine {
+  category: SpendingCategory
+  /** Money out this month, in maloti. */
+  amount: number
+  /** The same category the month before, in maloti. */
+  lastMonth: number
+  /** Payments this month. */
+  count: number
+}
+
+export interface SpendingInsights {
+  /** "2026-11" */
+  month: string
+  /** Money out this month (everything below added up). */
+  spent: number
+  /** Money out the month before. */
+  lastMonthSpent: number
+  /** Money in this month. */
+  received: number
+  /** Biggest first; categories with nothing in either month are left out. */
+  categories: SpendingLine[]
+  /** Who got the most this month (people, shops, billers), biggest first, at most 3. */
+  topPayees: { name: string; amount: number }[]
+}
+
 /** POST /v1/payments/send → MoneyResult (posts a money/mpho message into the chat) */
 export interface SendMoneyBody { chatId: string; toUserId: string; amount: number; pin: string; kind: 'money' | 'mpho'; note?: string; clientId: string }
 export interface MoneyResult { balance: number; transaction: Transaction; message?: Message }
@@ -1377,7 +1415,7 @@ export interface EsClaimDecisionBody {
 // where the user checks the details and confirms with their PIN as usual.
 
 /** Screens an `open` action can take the user to. */
-export type AssistantScreen = 'transactions' | 'my_qr' | 'receive_money' | 'pay' | 'money' | 'split' | 'topup' | 'bank' | 'remit' | 'ecosure'
+export type AssistantScreen = 'transactions' | 'my_qr' | 'receive_money' | 'pay' | 'money' | 'split' | 'topup' | 'bank' | 'remit' | 'ecosure' | 'insights' | 'school'
 
 export type AssistantAction =
   | { type: 'send_money'; msisdn: string; name: string; amount: number; note?: string }
@@ -2468,6 +2506,7 @@ export const MINI_APP_ICONS = [
   { id: 'money', name: 'Pay code' },
   { id: 'receive', name: 'Receive money' },
   { id: 'split', name: 'Split bill' },
+  { id: 'insights', name: 'Spending insights' },
   { id: 'scan', name: 'Pay merchant' },
   { id: 'paybill', name: 'Pay bill' },
   { id: 'topup', name: 'Card to wallet' },

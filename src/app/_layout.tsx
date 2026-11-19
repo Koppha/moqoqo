@@ -75,6 +75,9 @@ function Navigator({ signedIn, onboarded, mode }: { signedIn: boolean; onboarded
         <Stack.Protected guard={signedIn && mode === 'customer'}>
           <Stack.Screen name="(tabs)" />
           <Stack.Screen name="lec" />
+          <Stack.Screen name="school/index" />
+          <Stack.Screen name="school/ask" />
+          <Stack.Screen name="insights" />
           <Stack.Screen name="money" />
           <Stack.Screen name="receive-money" />
           <Stack.Screen name="split/index" />

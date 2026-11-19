@@ -9,9 +9,11 @@ import type {
   MerchantSummary,
   Message,
   PublicUser,
+  SpendingInsights,
   Transaction,
 } from '../../../shared/api'
 import { ensureAssistantChat } from '../assistant/account'
+import { spendingInsights } from '../services/insights'
 import { customerWrote } from '../services/support'
 import { maseru } from '../assistant/tools'
 import type { Ctx } from '../context'
@@ -198,6 +200,12 @@ export async function v1Routes(app: FastifyInstance, ctx: Ctx) {
   app.get('/v1/transactions', auth, async (req): Promise<Transaction[]> => {
     const { limit } = parse(z.object({ limit: z.coerce.number().int().min(1).max(200).default(50) }), req.query)
     return listTransactions(ctx.db, req.user.id, limit)
+  })
+
+  // Spending insights: this month's money out by category, beside last month (Lesotho months).
+  app.get('/v1/insights', auth, async (req): Promise<SpendingInsights> => {
+    const { month } = parse(z.object({ month: z.string().regex(/^\d{4}-\d{2}$/).optional() }), req.query)
+    return spendingInsights(ctx.db, req.user.id, month)
   })
 
   // ---------- chats ----------

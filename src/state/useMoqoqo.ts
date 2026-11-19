@@ -68,27 +68,49 @@ export function useMoqoqo() {
     }
   }
 
-  /** Kopa (money) or Ntefelle (pay a bill for me). No money moves until someone in the chat pays. */
-  async function createRequest(chatId: string, bill?: BillKey, presetAmount?: number) {
+  /**
+   * Kopa (money) or Ntefelle (pay a bill for me). No money moves until someone in the chat pays.
+   * `billFor`: the bill's own account and detail (a learner's school fees), instead of the demo account.
+   * Resolves true when the request was sent.
+   */
+  async function createRequest(chatId: string, bill?: BillKey, presetAmount?: number, billFor?: { account: string; detail: string }): Promise<boolean> {
     const chat = state.chats[chatId]
-    if (!chat) return
+    if (!chat) return false
+    const billAccount = bill ? billFor?.account ?? BILLS[bill].account : undefined
+    const billDetail = bill ? billFor?.detail ?? BILLS[bill].detail : undefined
     const recipient: Recipient = bill
-      ? { name: t.bills[bill].name, subtitle: t.flows.billPays(BILLS[bill].detail, chat.title), icon: BILL_ICON[bill].icon, color: BILL_ICON[bill].color }
+      ? { name: t.bills[bill].name, subtitle: t.flows.billPays(billDetail ?? '', chat.title), icon: BILL_ICON[bill].icon, color: BILL_ICON[bill].color }
       : { name: chat.title, subtitle: chat.kind === 'group' ? t.common.group : maskMsisdn(others(chatId)[0]?.msisdn ?? ''), icon: chat.kind === 'group' ? 'people' : undefined }
     const amount = await askAmount({ title: bill ? t.flows.payForMe : t.flows.requestMoney, balance: state.balance, recipient, confirmLabel: t.flows.sendRequest, initial: presetAmount })
-    if (!amount) return
+    if (!amount) return false
     try {
       const message = await api<ApiMessage>('/v1/requests', {
         body: bill
-          ? { chatId, clientId: uid(), amount, kind: 'bill', bill, account: BILLS[bill].account, detail: BILLS[bill].detail }
+          ? { chatId, clientId: uid(), amount, kind: 'bill', bill, account: billAccount, detail: billDetail }
           : { chatId, clientId: uid(), amount, kind: 'money' },
       })
       dispatch({ type: 'message', message })
       toast(t.flows.requestSent)
       // Good moment to ask: the user is now waiting to hear back.
       enableNotifications()
+      return true
     } catch (e) {
       fail(e)
+      return false
+    }
+  }
+
+  /** School fees for a learner, paid straight to the school fees biller with the learner's reference. */
+  async function paySchool(amount: number, account: string, label: string): Promise<boolean> {
+    const pin = await askPin({ amount, label })
+    if (!pin) return false
+    try {
+      settled(await api<BillResult>('/v1/bills/pay', { body: { bill: 'school', account, amount, pin } }))
+      toast(t.flows.paidDirect(t.bills.school.payee))
+      return true
+    } catch (e) {
+      fail(e)
+      return false
     }
   }
 
@@ -224,7 +246,7 @@ export function useMoqoqo() {
 
   return {
     state, dispatch, toast, fail, settled, others,
-    sendMoney, createRequest, payRequest, declineRequest, buyLec, tapToPay, taxiChatId,
+    sendMoney, createRequest, payRequest, declineRequest, buyLec, paySchool, tapToPay, taxiChatId,
     sendText, retryText, startChat,
   }
 }

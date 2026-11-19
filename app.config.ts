@@ -67,6 +67,8 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     ...(business ? [['react-native-nfc-manager', { nfcPermission: 'Allow $(PRODUCT_NAME) to read customers’ phones to take payments.' }] as [string, object]] : []),
     // Pick people from the phone's contacts (Send money, phone-number fields).
     ['expo-contacts', { contactsPermission: 'Allow $(PRODUCT_NAME) to open your contacts so you can pick who to pay.' }] as [string, object],
+    // School fees: term due dates go in the phone's calendar with a reminder. Events only, never reminders lists.
+    ['expo-calendar', { calendarPermission: 'Allow $(PRODUCT_NAME) to add school fee due dates to your calendar.', remindersPermission: false }] as [string, object],
     // Long-press the app icon: Money / Scan / My QR code (customers), role-specific actions (business).
     // The items themselves are set at runtime (src/lib/shortcuts.ts); this only bundles their Android icons.
     ['expo-quick-actions', {

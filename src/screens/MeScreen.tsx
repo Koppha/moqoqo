@@ -139,6 +139,7 @@ export default function MeScreen() {
   // Self service: built-in screens, then whatever the portal puts in Me (e.g. Update KYC).
   const selfService: { key: string; icon: IconName; color: string; title: string; subtitle: string; onPress: () => void }[] = [
     { key: 'history', icon: 'receipt-outline', color: '#0EA5E9', title: t.svc.history, subtitle: t.svc.historySub, onPress: () => router.push('/transactions') },
+    { key: 'insights', icon: 'pie-chart-outline', color: '#7C3AED', title: t.insights.title, subtitle: t.insights.meSub, onPress: () => router.push('/insights') },
     { key: 'statement', icon: 'document-text-outline', color: '#0B1D86', title: t.statement.title, subtitle: t.statement.meSub, onPress: () => router.push('/statement') },
     { key: 'pin', icon: 'keypad-outline', color: '#5B2C9F', title: t.svc.changePin, subtitle: t.svc.changePinSub, onPress: () => router.push('/change-pin') },
     { key: 'phones', icon: 'phone-portrait-outline', color: '#16A34A', title: t.phones.title, subtitle: t.phones.meSub, onPress: () => router.push('/devices') },
