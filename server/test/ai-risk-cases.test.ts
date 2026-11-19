@@ -53,7 +53,7 @@ afterAll(() => t.close())
 describe('AI governance', () => {
   it('registers every model with what it decides, who oversees it, and its provider', async () => {
     const models = (await t.call('GET', '/admin/v1/ai/models', undefined, admin)).body
-    expect(models.map((m: any) => m.key)).toEqual(['fraud_score', 'aml_surveillance', 'case_summary', 'assistant'])
+    expect(models.map((m: any) => m.key)).toEqual(['fraud_score', 'aml_surveillance', 'case_summary', 'churn_risk', 'assistant'])
     const score = models.find((m: any) => m.key === 'fraud_score')
     expect(score).toMatchObject({ version: 0, mode: 'active', params: { flagAt: 60, blockAt: 0, caseAt: 80 }, available: true })
     expect(models.find((m: any) => m.key === 'case_summary')).toMatchObject({ available: true, provider: expect.stringContaining('Anthropic') })

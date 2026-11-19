@@ -9,7 +9,7 @@ const { createServer } = await import('./server')
 
 const config = loadConfig()
 const server = await createServer(config)
-const { app, configWatcher, intentSweeper, atmSweeper, stopOrderSweeper, insightSweeper, splitSweeper, loanSweeper, surveillance, push, apiMetrics } = server
+const { app, configWatcher, intentSweeper, atmSweeper, stopOrderSweeper, insightSweeper, churnSweeper, splitSweeper, loanSweeper, surveillance, push, apiMetrics } = server
 
 await app.listen({ port: config.port, host: config.host })
 claimLoopback(config.host, config.port)
@@ -19,6 +19,7 @@ intentSweeper.start()
 atmSweeper.start()
 stopOrderSweeper.start()
 insightSweeper.start()
+churnSweeper.start()
 splitSweeper.start()
 loanSweeper.start()
 surveillance.start()

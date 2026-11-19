@@ -14,6 +14,12 @@ import type { BillCategory, BillCategoryBody,
   AiModelKey,
   AiModelVersion,
   AiOutcome,
+  ChurnBand,
+  ChurnDetail,
+  ChurnFollowupBody,
+  ChurnFollowupStatus,
+  ChurnPage,
+  ChurnRow,
   CaseCloseBody,
   CaseFreezeBody,
   CaseOpenBody,
@@ -450,6 +456,14 @@ export const api = {
     versions: (key: AiModelKey) => request<AiModelVersion[]>('GET', `${A}/ai/models/${key}/versions`),
     decisions: (q: { model?: AiModelKey | ''; outcome?: AiOutcome | ''; page?: number; pageSize?: number }) =>
       request<Page<AiDecision>>('GET', `${A}/ai/decisions`, { query: { ...q } }),
+  },
+
+  churn: {
+    list: (q: { role?: 'agent' | 'merchant' | ''; band?: ChurnBand | ''; followup?: ChurnFollowupStatus | ''; q?: string; page?: number; pageSize?: number }) =>
+      request<ChurnPage>('GET', `${A}/churn`, { query: { ...q } }),
+    get: (userId: string) => request<ChurnDetail>('GET', `${A}/churn/${encodeURIComponent(userId)}`),
+    followup: (userId: string, body: ChurnFollowupBody) => request<ChurnRow>('PUT', `${A}/churn/${encodeURIComponent(userId)}/followup`, { body }),
+    run: () => request<{ scored: number }>('POST', `${A}/churn/run`),
   },
 
   cases: {

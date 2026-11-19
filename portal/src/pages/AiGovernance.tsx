@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Link } from 'react-router'
 import { AI_MODEL_INFO, SCORE_FEATURE_INFO, type AiDecision, type AiModel, type AiModelKey, type AiModelMode, type AiOutcome, type ScoreReason } from '../../../shared/api'
 import { api, errorMessage } from '../api'
 import { useAuth } from '../auth'
@@ -98,8 +99,13 @@ function ModelCard({ m, onSaved }: { m: AiModel; onSaved: (m: AiModel) => void }
       <dl className="stats" style={{ marginTop: 16 }}>
         <div className="stat"><dt className="stat-label">Decisions (30 days)</dt><dd className="stat-value">{s.decisions}</dd>
           {info.kind !== 'llm' && <dd className="stat-hint">{s.byOutcome.flag} flagged · {s.byOutcome.block} blocked</dd>}</div>
-        <div className="stat"><dt className="stat-label">Confirmed by staff</dt><dd className="stat-value">{pct(s.precision)}</dd>
-          <dd className="stat-hint">{s.confirmedFraud} fraud · {s.falsePositives} false alarms</dd></div>
+        {m.key === 'churn_risk' ? (
+          <div className="stat"><dt className="stat-label">Track record</dt><dd className="stat-value small"><Link to="/retention">In Retention</Link></dd>
+            <dd className="stat-hint">How many it called high risk went quiet</dd></div>
+        ) : (
+          <div className="stat"><dt className="stat-label">Confirmed by staff</dt><dd className="stat-value">{pct(s.precision)}</dd>
+            <dd className="stat-hint">{s.confirmedFraud} fraud · {s.falsePositives} false alarms</dd></div>
+        )}
         {info.kind === 'scoring' && (
           <div className="stat"><dt className="stat-label">Average score</dt><dd className="stat-value">{s.avgScore.lastWeek ?? '–'}</dd>
             <dd className="stat-hint">{s.avgScore.before == null ? 'last 7 days' : `3 weeks before: ${s.avgScore.before}`}{drift ? ' · shifted, check for drift' : ''}</dd></div>
@@ -139,7 +145,7 @@ function ModelCard({ m, onSaved }: { m: AiModel; onSaved: (m: AiModel) => void }
             {dirty && <Button onClick={() => { setMode(m.mode); setParams(m.params); setNote('') }}>Undo</Button>}
             <Button onClick={() => setHistory((h) => !h)}>{history ? 'Hide versions' : 'Versions'}</Button>
           </div>
-          <p className="muted small">Try a change in Shadow first: it scores and logs without flagging or blocking anyone.</p>
+          {info.modes.includes('shadow') && <p className="muted small">Try a change in Shadow first: it scores and logs without flagging or blocking anyone.</p>}
         </fieldset>
       )}
       {history && versions.data && (

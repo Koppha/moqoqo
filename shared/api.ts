@@ -2269,7 +2269,7 @@ export interface ScoreReason { feature: ScoreFeature | SurveillanceKey; points: 
 // safely; "active" acts. Every decision is logged with its reasons and joined to the human review outcome, which
 // measures how often each model is right.
 
-export type AiModelKey = 'fraud_score' | 'aml_surveillance' | 'case_summary' | 'assistant'
+export type AiModelKey = 'fraud_score' | 'aml_surveillance' | 'case_summary' | 'churn_risk' | 'assistant'
 export type AiModelMode = 'off' | 'shadow' | 'active'
 export type AiOutcome = 'allow' | 'flag' | 'block' | 'info'
 export interface AiParamInfo { label: string; hint?: string; min: number; max: number; step?: number }
@@ -2330,6 +2330,22 @@ export const AI_MODEL_INFO: Record<AiModelKey, AiModelInfo> = {
     limitations: 'Can misread patterns or miss context. Never use it as the reason for an outcome without checking the payments.',
     modes: ['off', 'active'],
     params: {},
+  },
+  churn_risk: {
+    title: 'Agent & merchant churn risk',
+    kind: 'scoring',
+    purpose: 'Scores every agent and merchant 0–100 each day for how likely they are to stop using EcoCash, so staff can call or visit them before they go.',
+    decides: 'Nothing on its own: it ranks agents and merchants for staff to follow up. It never changes an account or a payment.',
+    humanOversight: 'Staff see the score with its reasons in Retention, record what they did (contacted, retained, lost), and check its track record there: how many it called high risk actually went quiet.',
+    dataUsed: 'Their own EcoCash activity: payments, cash in and out, customers served and float over the last 8 weeks, and how long they have been with EcoCash. No personal details beyond the wallet.',
+    limitations: 'Points-based, so fully explainable but simpler than a trained model. Seasonal quiet spells (school holidays, month end) can raise scores. Agents and merchants younger than 4 weeks have too little history and are scored low. Thresholds are placeholders until ETL sets them.',
+    modes: ['off', 'active'],
+    params: {
+      highAt: { label: 'High risk at score', hint: 'Shown first in Retention.', min: 1, max: 100 },
+      mediumAt: { label: 'Medium risk at score', min: 1, max: 100 },
+      quietDays: { label: 'Gone quiet after days without a transaction', hint: 'Counted as churned, not just at risk.', min: 7, max: 180 },
+      lowFloat: { label: 'Agent float low below (M)', hint: 'An agent without float turns customers away.', min: 0, max: 100000 },
+    },
   },
   assistant: {
     title: 'EcoCash Assistant (Claude)',
@@ -2393,6 +2409,82 @@ export interface AiDecision {
   createdAt: string
 }
 /** GET /admin/v1/ai/decisions?model=&outcome=&page= → Page<AiDecision> with counts model:* and outcome:*. */
+
+// ---------- retention: agent & merchant churn risk (portal: Retention) ----------
+//
+// Every day the churn_risk model (AI governance) scores each active agent and merchant 0–100 from their own activity
+// over the last 8 weeks. Staff see who is slipping, why, and record what they did about it.
+//
+// GET  /admin/v1/churn?role=&band=&followup=&q=&page=&pageSize= → ChurnPage (latest scores, highest first)
+// GET  /admin/v1/churn/:userId                                → ChurnDetail (score history and activity)
+// PUT  /admin/v1/churn/:userId/followup  ChurnFollowupBody    → ChurnRow   (admin role; audited)
+// POST /admin/v1/churn/run                                    → { scored: number } (admin role; scores now)
+
+export type ChurnBand = 'high' | 'medium' | 'low' | 'quiet'
+export const CHURN_BAND_LABEL: Record<ChurnBand, string> = { high: 'High risk', medium: 'Medium risk', low: 'Low risk', quiet: 'Gone quiet' }
+export type ChurnFollowupStatus = 'new' | 'contacted' | 'retained' | 'lost'
+export const CHURN_FOLLOWUP_LABEL: Record<ChurnFollowupStatus, string> = { new: 'Not contacted', contacted: 'Contacted', retained: 'Retained', lost: 'Lost' }
+
+export type ChurnFeature = 'inactive' | 'activity_drop' | 'value_drop' | 'customers_drop' | 'few_active_days' | 'low_float' | 'new_account'
+export const CHURN_FEATURE_INFO: Record<ChurnFeature, string> = {
+  inactive: 'Days since their last transaction',
+  activity_drop: 'Transactions per week, last 2 weeks against the 6 weeks before',
+  value_drop: 'Money through them per week, last 2 weeks against the 6 weeks before',
+  customers_drop: 'Different customers per week, last 2 weeks against the 6 weeks before',
+  few_active_days: 'Days with any transaction in the last 4 weeks',
+  low_float: 'Agent float (wallet balance) too low to serve cash-outs',
+  new_account: 'Too new to judge: less than 4 weeks of history',
+}
+export interface ChurnReason { feature: ChurnFeature; points: number; detail: string }
+
+/** The activity a score was worked out from. Per week figures: last 14 days against days 15–56. */
+export interface ChurnActivity {
+  daysSinceLast: number | null
+  txPerWeekNow: number
+  txPerWeekBefore: number
+  valuePerWeekNow: number
+  valuePerWeekBefore: number
+  customersPerWeekNow: number
+  customersPerWeekBefore: number
+  activeDays28: number
+  balance: number
+  tenureDays: number
+}
+
+export interface ChurnRow {
+  user: PublicUser & { code: string | null }
+  score: number
+  band: ChurnBand
+  /** Score a week before, for the trend; null when it wasn't scored then. */
+  scoreWeekAgo: number | null
+  reasons: ChurnReason[]
+  activity: ChurnActivity
+  scoredAt: string
+  followup: { status: ChurnFollowupStatus; note: string | null; by: string | null; at: string | null }
+}
+
+export interface ChurnSummary {
+  /** Latest band counts per role. */
+  byBand: Record<'agent' | 'merchant', Record<ChurnBand, number>>
+  /** Money through high and medium risk agents and merchants per week, before their slowdown: what is at stake. */
+  weeklyValueAtRisk: number
+  /**
+   * Track record: of those scored 30–37 days ago, how many have since gone quiet, by the band they were in then.
+   * null rates until there is history. Lets staff see whether high scores really come before churn.
+   */
+  backtest: { scoredOn: string | null; high: { scored: number; wentQuiet: number }; medium: { scored: number; wentQuiet: number }; low: { scored: number; wentQuiet: number } }
+  modelMode: AiModelMode
+  modelVersion: number
+  lastRun: string | null
+}
+
+export interface ChurnPage extends Page<ChurnRow> { summary: ChurnSummary }
+
+export interface ChurnDetail extends ChurnRow {
+  history: { day: string; score: number; band: ChurnBand }[]
+}
+
+export interface ChurnFollowupBody { status: ChurnFollowupStatus; note: string }
 
 // ---------- financial crime case management (portal: Cases) ----------
 //

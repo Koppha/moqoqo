@@ -10,7 +10,7 @@ import { listDecisions, listModels, modelVersions, setModel, type ConfigurableMo
 import { caseStats, closeCase, fileStr, freezeCase, getCase, listCases, openCaseManually, summariseCase, updateCase } from '../services/cases'
 import { audit } from './admin'
 
-const CONFIGURABLE = ['fraud_score', 'aml_surveillance', 'case_summary'] as const
+const CONFIGURABLE = ['fraud_score', 'aml_surveillance', 'case_summary', 'churn_risk'] as const
 const zNote = z.string().max(2000)
 
 export async function aiRiskRoutes(app: FastifyInstance, ctx: Ctx) {
@@ -36,7 +36,7 @@ export async function aiRiskRoutes(app: FastifyInstance, ctx: Ctx) {
   app.get('/admin/v1/ai/decisions', auth, async (req) => {
     const q = parse(
       z.object({
-        model: z.enum(['fraud_score', 'aml_surveillance', 'case_summary', 'assistant', '']).optional(),
+        model: z.enum(['fraud_score', 'aml_surveillance', 'case_summary', 'churn_risk', 'assistant', '']).optional(),
         outcome: z.enum(['allow', 'flag', 'block', 'info', '']).optional(),
         page: zPage,
         pageSize: z.coerce.number().int().min(1).max(100).default(20),

@@ -1,6 +1,6 @@
 // AI governance and model risk management: the model registry (versioned modes and thresholds), the decision log,
 // and how well each model does against staff reviews. Portal: AI governance.
-import { AI_MODEL_INFO, type AiDecision, type AiModel, type AiModelKey, type AiModelMode, type AiModelVersion, type AiOutcome, type Page, type ScoreReason } from '../../../shared/api'
+import { AI_MODEL_INFO, type AiDecision, type AiModel, type AiModelKey, type AiModelMode, type AiModelStats, type AiModelVersion, type AiOutcome, type Page, type ScoreReason } from '../../../shared/api'
 import type { Ctx } from '../context'
 import type { Queryable } from '../db/index'
 import { AppError } from '../errors'
@@ -20,6 +20,7 @@ export const MODEL_DEFAULTS: Record<ConfigurableModel, { mode: AiModelMode; para
     params: { structuringAmount: 5000, structuringCount: 3, passThroughMin: 2000, passThroughPercent: 80, dormantDays: 90, dormantAmount: 2000 },
   },
   case_summary: { mode: 'active', params: {} },
+  churn_risk: { mode: 'active', params: { highAt: 60, mediumAt: 35, quietDays: 30, lowFloat: 300 } },
 }
 
 export interface ModelConfig { key: ConfigurableModel; version: number; mode: AiModelMode; params: Record<string, number> }
@@ -137,6 +138,7 @@ export async function listModels(ctx: Ctx): Promise<AiModel[]> {
       out.push({ key, version: 1, mode: on ? 'active' : 'off', params: {}, changedBy: null, changedAt: null, note: null, provider: llm, available: on, stats })
       continue
     }
+    if (key === 'churn_risk') Object.assign(stats, await churnStats(q))
     const m = await getModel(q, key)
     const [v] = m.version
       ? await q.query<{ changed_by: string | null; note: string | null; created_at: Date }>('SELECT changed_by, note, created_at FROM ai_model_versions WHERE model = $1 AND version = $2', [key, m.version])
@@ -183,5 +185,29 @@ export async function listDecisions(q: Queryable, filters: { model: AiModelKey |
       }
     }),
     total, page, pageSize, counts: facetCounts(groups, filters),
+  }
+}
+
+/**
+ * Churn risk doesn't decide payments, so its figures come from its daily scores: agents and merchants scored on the
+ * latest day (as decisions; high risk as flags), their score spread, and the average score drift.
+ */
+async function churnStats(q: Queryable): Promise<Partial<AiModelStats>> {
+  const buckets = await q.query<{ b: number; n: number; flags: number }>(
+    `SELECT least(score / 10, 9)::int AS b, count(*)::int AS n, count(*) FILTER (WHERE band = 'high')::int AS flags
+       FROM churn_scores WHERE day = (SELECT max(day) FROM churn_scores) GROUP BY b`,
+  )
+  const [avg] = await q.query<{ last_week: string | null; before: string | null }>(
+    `SELECT avg(score) FILTER (WHERE day >= CURRENT_DATE - 7) AS last_week, avg(score) FILTER (WHERE day < CURRENT_DATE - 7) AS before
+       FROM churn_scores WHERE day >= CURRENT_DATE - 28`,
+  )
+  const decisions = buckets.reduce((a, b) => a + b.n, 0)
+  const flags = buckets.reduce((a, b) => a + b.flags, 0)
+  const round = (v: string | null | undefined) => (v == null ? null : Math.round(Number(v) * 10) / 10)
+  return {
+    decisions,
+    byOutcome: { allow: 0, block: 0, flag: flags, info: decisions - flags },
+    scoreBuckets: Array.from({ length: 10 }, (_, i) => buckets.find((x) => x.b === i)?.n ?? 0),
+    avgScore: { lastWeek: round(avg?.last_week), before: round(avg?.before) },
   }
 }

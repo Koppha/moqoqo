@@ -27,6 +27,8 @@ import { supportAdminRoutes } from './routes/support'
 import { createAtmSweeper } from './services/atm'
 import { createStopOrderSweeper } from './services/stopOrders'
 import { createInsightSweeper } from './services/insights'
+import { createChurnSweeper } from './services/churn'
+import { retentionRoutes } from './routes/retention'
 import { stopOrderRoutes } from './routes/stopOrders'
 import { createLoanSweeper } from './services/societyLoans'
 import { createSplitSweeper } from './services/splits'
@@ -70,6 +72,8 @@ export interface BuiltApp {
   stopOrderSweeper: ReturnType<typeof createStopOrderSweeper>
   /** The assistant's monthly spending summaries, hourly once started. */
   insightSweeper: ReturnType<typeof createInsightSweeper>
+  /** Agent & merchant churn scores, once a Lesotho day (checked hourly) once started. */
+  churnSweeper: ReturnType<typeof createChurnSweeper>
   splitSweeper: ReturnType<typeof createSplitSweeper>
   /** Society loan reminders and expiry, hourly once started. */
   loanSweeper: ReturnType<typeof createLoanSweeper>
@@ -153,6 +157,7 @@ export async function buildApp(opts: { config: Config; db: Db; logger?: boolean 
   const atmSweeper = createAtmSweeper(ctx)
   const stopOrderSweeper = createStopOrderSweeper(ctx)
   const insightSweeper = createInsightSweeper(ctx)
+  const churnSweeper = createChurnSweeper(ctx)
   const splitSweeper = createSplitSweeper(ctx)
   const loanSweeper = createLoanSweeper(ctx)
   ctx.onCredit = splitSweeper.onCredit
@@ -269,6 +274,7 @@ export async function buildApp(opts: { config: Config; db: Db; logger?: boolean 
   await analyticsRoutes(app, ctx)
   await performanceRoutes(app, ctx)
   await aiRiskRoutes(app, ctx)
+  await retentionRoutes(app, ctx)
   await simSwapRoutes(app, ctx)
   await securityRoutes(app, ctx)
 
@@ -278,6 +284,7 @@ export async function buildApp(opts: { config: Config; db: Db; logger?: boolean 
     atmSweeper.stop()
     stopOrderSweeper.stop()
     insightSweeper.stop()
+    churnSweeper.stop()
     splitSweeper.stop()
     push.stop()
     loanSweeper.stop()
@@ -288,5 +295,5 @@ export async function buildApp(opts: { config: Config; db: Db; logger?: boolean 
     await ctx.notifier.idle()
   })
 
-  return { app, ctx, configWatcher, intentSweeper, atmSweeper, stopOrderSweeper, insightSweeper, splitSweeper, loanSweeper, surveillance, push, apiMetrics }
+  return { app, ctx, configWatcher, intentSweeper, atmSweeper, stopOrderSweeper, insightSweeper, churnSweeper, splitSweeper, loanSweeper, surveillance, push, apiMetrics }
 }
