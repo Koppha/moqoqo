@@ -8,11 +8,13 @@ const en = {
   greet: (name: string) => `Lumela, ${name}`,
   close: 'Close EcoSure',
   help: 'Help and support',
-  helpText: 'Call the EcoSure call centre on [number TBC], or send a message in your EcoSure chat.',
+  /** The call centre number is set in the portal (EcoSure content). */
+  helpText: (callCentre: string | null) =>
+    callCentre ? `Call the EcoSure call centre on ${callCentre}, or send a message in your EcoSure chat.` : 'Send a message in your EcoSure chat and the EcoSure team will answer.',
   tabs: { home: 'Home', policy: 'My policy', claims: 'Claims', pay: 'Payments', me: 'Me' },
   account: 'My account',
   slides: [
-    { title: 'Cover your whole family from M30 a month', sub: 'EcoSure Family cover', cta: 'Get a quote' },
+    { title: 'Cover your whole family', sub: 'EcoSure Family cover', cta: 'Get a quote' },
     { title: 'Pay your premium from your EcoCash wallet', sub: 'Pay for yourself or a loved one', cta: 'Pay now' },
     { title: 'Submit and track claims in the app', sub: 'Updates in your EcoSure chat at every step', cta: 'Open claims' },
   ],
@@ -43,8 +45,8 @@ const en = {
   },
   selectCover: 'Select your cover',
   cards: {
-    family: { title: 'Family cover', sub: 'You, your spouse and children, from M30 a month' },
-    single: { title: 'Single cover', sub: 'Funeral cover for yourself, from M20 a month' },
+    family: { title: 'Family cover', sub: 'You, your spouse and children' },
+    single: { title: 'Single cover', sub: 'Funeral cover for yourself' },
     shortTerm: { title: 'Short-term cover', sub: 'Your car, devices, home or business' },
     claims: { title: 'Claims', sub: 'Submit a funeral claim and track it' },
   },
@@ -72,6 +74,9 @@ const en = {
   familyOrSingle: 'Family or single cover',
   shortTermSection: 'Short-term insurance',
   from: (m: number) => `From M${m} a month`,
+  /** A line with the lowest price from the catalogue added: "You, your spouse and children, from M30 a month". */
+  slideFamilyFrom: (m: number) => `Cover your whole family from M${m} a month`,
+  withFrom: (text: string, m: number) => `${text}, from M${m} a month`,
   pricedByTeam: 'Priced by our team for you',
   categories: {
     funeral: 'Funeral cover for you, or for your whole family',
@@ -85,8 +90,6 @@ const en = {
   productQuote: (name: string) => `${name} quote`,
   coverType: 'Cover type',
   funeralBlurb: 'Financial support for you, or for your whole family.',
-  /** Funeral package taglines by product code; a package without one shows just its name. */
-  taglines: { 'FUN-LITE': 'Essential cover for peace of mind', 'FUN-BASIC': 'More protection for your loved ones', 'FUN-STD': 'Our most popular cover', 'FUN-PREM': 'Maximum cover for complete security' } as Record<string, string>,
   package: 'Package',
   perMonth: (amt: string) => `${amt} / month`,
   chooseCover: 'Choose your cover',
@@ -136,7 +139,6 @@ const en = {
   // ---- buy
   step: (n: number) => `Create a policy · Step ${n} of 4`,
   terms: 'Terms and conditions',
-  termsText: 'EcoSure cover is underwritten by LNIG Hollard. Premiums are collected monthly from your EcoCash wallet. Waiting periods apply. [Full Ts&Cs text from SEFS Legal]',
   agree: 'I have read and agree to the Ts&Cs',
   mustAgree: 'Please accept the Ts&Cs to continue.',
   details: 'Your details',
@@ -156,7 +158,10 @@ const en = {
   beneficiaryMobile: 'Beneficiary’s mobile number (optional)',
   missingDetails: 'Enter your ID number, full name, date of birth and gender.',
   badDob: 'Enter your date of birth as DD/MM/YYYY.',
-  priceNote: 'Prices from the EcoSure BRS; dependant limits and waiting periods are still to be confirmed by the underwriter.',
+  priceNote: 'Prices and cover from EcoSure. Dependant limits are still to be confirmed by the underwriter.',
+  coverTerms: (amt: string, months?: number) =>
+    months ? `Pays ${amt} · cover starts after ${months} month${months === 1 ? '' : 's'}` : `Pays ${amt} · cover from day one`,
+  needsBeneficiary: 'This package needs a beneficiary. Add who receives the payout.',
   payConfirm: 'Pay and confirm',
   summary: 'Summary',
   payWith: 'Pay with',
@@ -291,11 +296,12 @@ const st: EsStrings = {
   greet: (name) => `Lumela, ${name}`,
   close: 'Koala EcoSure',
   help: 'Thuso',
-  helpText: 'Letsetsa setsi sa mehala sa EcoSure ho [nomoro e tla tsebisoa], kapa u romele molaetsa puisanong ea hau ea EcoSure.',
+  helpText: (callCentre) =>
+    callCentre ? `Letsetsa setsi sa mehala sa EcoSure ho ${callCentre}, kapa u romele molaetsa puisanong ea hau ea EcoSure.` : 'Romela molaetsa puisanong ea hau ea EcoSure, sehlopha sa EcoSure se tla u araba.',
   tabs: { home: 'Lehae', policy: 'Pholisi ea ka', claims: 'Litleleme', pay: 'Litefo', me: 'Nna' },
   account: 'Akhaonto ea ka',
   slides: [
-    { title: 'Sireletsa lelapa lohle ho tloha ho M30 ka khoeli', sub: 'Tšireletso ea Lelapa ea EcoSure', cta: 'Fumana theko' },
+    { title: 'Sireletsa lelapa lohle', sub: 'Tšireletso ea Lelapa ea EcoSure', cta: 'Fumana theko' },
     { title: 'Lefa premium sepacheng sa hau sa EcoCash', sub: 'Iphe kapa u lefelle motho eo u mo ratang', cta: 'Lefa hona joale' },
     { title: 'Romela le ho latela litleleme ka app', sub: 'Litaba puisanong ea hau ea EcoSure mohato o mong le o mong', cta: 'Bula litleleme' },
   ],
@@ -325,8 +331,8 @@ const st: EsStrings = {
   },
   selectCover: 'Khetha tšireletso ea hau',
   cards: {
-    family: { title: 'Tšireletso ea lelapa', sub: 'Uena, molekane le bana, ho tloha ho M30 ka khoeli' },
-    single: { title: 'Tšireletso ea motho a le mong', sub: 'Tšireletso ea lepato bakeng sa hau, ho tloha ho M20 ka khoeli' },
+    family: { title: 'Tšireletso ea lelapa', sub: 'Uena, molekane le bana' },
+    single: { title: 'Tšireletso ea motho a le mong', sub: 'Tšireletso ea lepato bakeng sa hau' },
     shortTerm: { title: 'Tšireletso ea nakoana', sub: 'Koloi, lisebelisoa, ntlo kapa khoebo ea hau' },
     claims: { title: 'Litleleme', sub: 'Romela tleleme ea lepato ebe u e latela' },
   },
@@ -353,6 +359,8 @@ const st: EsStrings = {
   familyOrSingle: 'Tšireletso ea lelapa kapa ea motho a le mong',
   shortTermSection: 'Inshorense ea nakoana',
   from: (m) => `Ho tloha ho M${m} ka khoeli`,
+  slideFamilyFrom: (m) => `Sireletsa lelapa lohle ho tloha ho M${m} ka khoeli`,
+  withFrom: (text, m) => `${text}, ho tloha ho M${m} ka khoeli`,
   pricedByTeam: 'Theko e etsoa ke sehlopha sa rona',
   categories: {
     funeral: 'Tšireletso ea lepato bakeng sa hau, kapa lelapa lohle',
@@ -366,7 +374,6 @@ const st: EsStrings = {
   productQuote: (name) => `Theko ea ${name}`,
   coverType: 'Mofuta oa tšireletso',
   funeralBlurb: 'Tšehetso ea lichelete bakeng sa hau, kapa lelapa la hau kaofela.',
-  taglines: { 'FUN-LITE': 'Tšireletso ea motheo bakeng sa khotso ea kelello', 'FUN-BASIC': 'Tšireletso e eketsehileng bakeng sa baratuoa ba hau', 'FUN-STD': 'Tšireletso e ratoang ka ho fetisisa', 'FUN-PREM': 'Tšireletso e felletseng ka ho fetisisa' },
   package: 'Sephutheloana',
   perMonth: (amt) => `${amt} / khoeli`,
   chooseCover: 'Khetha tšireletso ea hau',
@@ -413,7 +420,6 @@ const st: EsStrings = {
 
   step: (n) => `Etsa pholisi · Mohato oa ${n} ho a 4`,
   terms: 'Lipehelo le maemo',
-  termsText: 'Tšireletso ea EcoSure e tiisoa ke LNIG Hollard. Li-premium li nkoa ka khoeli sepacheng sa hau sa EcoCash. Linako tsa ho emela li sebetsa. [Mongolo o felletseng o tsoa ho SEFS Legal]',
   agree: 'Ke balile ebile ke lumellana le lipehelo',
   mustAgree: 'Ka kopo amohela lipehelo ho tsoela pele.',
   details: 'Lintlha tsa hau',
@@ -433,7 +439,10 @@ const st: EsStrings = {
   beneficiaryMobile: 'Nomoro ea mohala ea mojalefa (ha e qobelloe)',
   missingDetails: 'Kenya nomoro ea ID, lebitso le felletseng, letsatsi la tsoalo le bong.',
   badDob: 'Kenya letsatsi la tsoalo joalo ka LL/KK/SSSS.',
-  priceNote: 'Litheko li tsoa ho BRS ea EcoSure; meeli ea ba itšetlehileng le linako tsa ho emela li sa ntse li tla netefatsoa ke motiisi.',
+  priceNote: 'Litheko le tšireletso li tsoa ho EcoSure. Meeli ea ba itšetlehileng e sa ntse e tla netefatsoa ke motiisi.',
+  coverTerms: (amt, months) =>
+    months ? `E lefa ${amt} · tšireletso e qala kamora ${months === 1 ? "khoeli e le 'ngoe" : `likhoeli tse ${months}`}` : `E lefa ${amt} · tšireletso ho tloha letsatsing la pele`,
+  needsBeneficiary: 'Sephutheloana sena se hloka mojalefa. Kenya ea tla fumana tefo.',
   payConfirm: 'Lefa ebe u netefatsa',
   summary: 'Kakaretso',
   payWith: 'Lefa ka',

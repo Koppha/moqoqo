@@ -1,5 +1,7 @@
 import { useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
-import type { EsClaimStatus, EsPolicy, EsPolicyStatus, EsRelationship } from '../../../shared/api'
+import type {
+  AdminEsCatalogue, AdminEsProduct, EsClaimStatus, EsContent, EsOption, EsPolicy, EsPolicyStatus, EsRelationship, LocalizedText,
+} from '../../../shared/api'
 import { api, errorMessage, type AdminEsClaim, type AdminEsQuote, type EsQuoteStatus } from '../api'
 import { Dialog } from '../components/Dialog'
 import { Icon } from '../components/Icon'
@@ -113,11 +115,12 @@ function DocumentList({ documents, open }: { documents: { label: string; fileNam
 
 // ---------- page ----------
 
-type Tab = 'claims' | 'quotes' | 'policies'
+type Tab = 'claims' | 'quotes' | 'policies' | 'catalogue'
 const TABS: { id: Tab; label: string }[] = [
   { id: 'claims', label: 'Claims' },
   { id: 'quotes', label: 'Quotes' },
   { id: 'policies', label: 'Policies' },
+  { id: 'catalogue', label: 'Catalogue' },
 ]
 
 export function EcoSurePage() {
@@ -133,7 +136,7 @@ export function EcoSurePage() {
   }
   return (
     <>
-      <PageHeader title="EcoSure" subtitle="Insurance mini app: funeral claims, short-term quotes and policies. Customers are told in the EcoSure chat." />
+      <PageHeader title="EcoSure" subtitle="Insurance mini app: funeral claims, short-term quotes, policies and the catalogue customers see. Customers are told in the EcoSure chat." />
       <ReadOnlyNotice />
       <div className="tabs" role="tablist" aria-label="EcoSure">
         {TABS.map((t, i) => (
@@ -160,6 +163,7 @@ export function EcoSurePage() {
         {tab === 'claims' && <ClaimsTab />}
         {tab === 'quotes' && <QuotesTab />}
         {tab === 'policies' && <PoliciesTab />}
+        {tab === 'catalogue' && <CatalogueTab />}
       </div>
     </>
   )
@@ -804,6 +808,264 @@ function PoliciesTab() {
           </>
         )}
       </ListState>
+    </Card>
+  )
+}
+
+// ---------- catalogue ----------
+// Funeral packages, prices and cover terms come from EcoSure's package list (read only here). Staff set the words
+// around them: taglines, the most popular package, the Ts&Cs and the call centre number.
+
+const PRODUCT_STATUS: Record<AdminEsProduct['status'], { label: string; chip: string }> = {
+  active: { label: 'On sale', chip: 'chip-ok' },
+  draft: { label: 'Draft', chip: 'chip-neutral' },
+  retired: { label: 'Off sale', chip: 'chip-cancelled' },
+}
+
+function CoverCell({ option }: { option?: EsOption }) {
+  if (!option) return <span className="muted">Not offered</span>
+  return (
+    <>
+      <strong>{formatMoney(option.monthlyPremium)}</strong> a month
+      <div className="muted small">
+        {option.sumAssured != null ? `Pays ${formatMoney(option.sumAssured)}` : 'Payout not set'}
+        {option.waitingMonths ? ` · ${option.waitingMonths}-month wait` : ''}
+        {option.beneficiaryRequired ? ' · beneficiary required' : ''}
+      </div>
+    </>
+  )
+}
+
+function CatalogueTab() {
+  const toast = useToast()
+  const cat = useAsync(() => api.ecosure.catalogue(), [])
+  const [data, setData] = useState<AdminEsCatalogue | null>(null)
+  const [syncing, setSyncing] = useState(false)
+  const [editing, setEditing] = useState<AdminEsProduct | null>(null)
+  const view = data ?? cat.data
+
+  const syncNow = async () => {
+    setSyncing(true)
+    try {
+      const next = await api.ecosure.syncCatalogue()
+      setData(next)
+      if (next.sync?.ok) toast.success(next.sync.updated ? `${next.sync.updated} changes from EcoSure.` : 'Already up to date with EcoSure.')
+      else toast.error(`EcoSure package list failed: ${next.sync?.error ?? 'unknown error'}`)
+    } catch (err) {
+      toast.error(errorMessage(err))
+    } finally {
+      setSyncing(false)
+    }
+  }
+  const makePopular = async (p: AdminEsProduct) => {
+    try {
+      setData(await api.ecosure.productText(p.code, { popular: true }))
+      toast.success(`${p.name} is now shown first.`)
+    } catch (err) {
+      toast.error(errorMessage(err))
+    }
+  }
+
+  return (
+    <ListState loading={cat.loading && !view} error={cat.error} data={view} onRetry={cat.reload} isEmpty={(d) => d.products.length === 0} emptyTitle="No EcoSure products yet">
+      {(d) => {
+        const funeral = d.products.filter((p) => p.line === 'funeral')
+        const other = d.products.filter((p) => p.line !== 'funeral')
+        return (
+          <>
+            <Card
+              title="EcoSure package list"
+              actions={
+                <WriteButton size="sm" busy={syncing} onClick={syncNow}>
+                  Sync now
+                </WriteButton>
+              }
+            >
+              {d.sync ? (
+                <p>
+                  <span className={`chip ${d.sync.ok ? 'chip-ok' : 'chip-suspended'}`}>{d.sync.ok ? 'Connected' : 'Failed'}</span> Last checked{' '}
+                  {formatMaseru(d.sync.at)}
+                  {d.sync.ok ? ` · ${d.sync.packages} packages · ${d.sync.updated} changes` : ` · ${d.sync.error ?? ''} (the app keeps the last good prices)`}
+                </p>
+              ) : (
+                <p className="muted">Not connected: set ECOSURE_PACKAGES_URL on the server. Prices below are the last ones saved.</p>
+              )}
+              {d.sync?.skipped.length ? <p className="muted small">Not in the app (they fit no package tier): {d.sync.skipped.join(', ')}</p> : null}
+              <p className="muted small">
+                Packages, prices, payouts, waiting periods and beneficiary rules come from EcoSure and are checked every hour. Policies already sold keep
+                their premium.
+              </p>
+            </Card>
+
+            <Card title="Funeral packages">
+              <div className="table-wrap">
+                <table className="table">
+                  <thead>
+                    <tr>
+                      <th scope="col">Package</th>
+                      <th scope="col">Family cover</th>
+                      <th scope="col">Single cover</th>
+                      <th scope="col">Extended member</th>
+                      <th scope="col">Shown to customers</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {funeral.map((p) => (
+                      <tr key={p.code}>
+                        <td>
+                          <strong>{p.name}</strong> <span className={`chip ${PRODUCT_STATUS[p.status].chip}`}>{PRODUCT_STATUS[p.status].label}</span>
+                          <div className="muted small">
+                            {p.code}
+                            {p.packageIds.length ? ` · EcoSure ${p.packageIds.join(', ')}` : ''}
+                          </div>
+                        </td>
+                        <td>
+                          <CoverCell option={p.options.find((o) => o.cover === 'family')} />
+                        </td>
+                        <td>
+                          <CoverCell option={p.options.find((o) => o.cover === 'single')} />
+                        </td>
+                        <td>
+                          {p.extendedMember ? (
+                            <>
+                              <strong>{formatMoney(p.extendedMember.monthlyPremium)}</strong> a month
+                              <div className="muted small">Pays {formatMoney(p.extendedMember.sumAssured)}</div>
+                            </>
+                          ) : (
+                            <span className="muted">Not offered</span>
+                          )}
+                        </td>
+                        <td>
+                          {p.tagline ? <div>{p.tagline.en}</div> : <div className="muted">No tagline</div>}
+                          {p.popular ? <span className="chip chip-ok">Shown first</span> : null}
+                          <div style={{ display: 'flex', gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
+                            <WriteButton size="sm" onClick={() => setEditing(p)}>
+                              Edit tagline
+                            </WriteButton>
+                            {!p.popular && p.status === 'active' ? (
+                              <WriteButton size="sm" onClick={() => makePopular(p)}>
+                                Show first
+                              </WriteButton>
+                            ) : null}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </Card>
+
+            {other.length ? (
+              <Card title="Short-term products">
+                <ul className="plain-list">
+                  {other.map((p) => (
+                    <li key={p.code}>
+                      <strong>{p.name}</strong> <span className={`chip ${PRODUCT_STATUS[p.status].chip}`}>{PRODUCT_STATUS[p.status].label}</span>{' '}
+                      <span className="muted small">
+                        {p.pricing === 'quoted' ? 'Priced by staff for each quote' : p.options.map((o) => `${o.label} ${formatMoney(o.monthlyPremium)}`).join(' · ')}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </Card>
+            ) : null}
+
+            <ContentCard content={d.content} onSaved={setData} />
+            {editing && <TaglineDialog product={editing} onClose={() => setEditing(null)} onSaved={setData} />}
+          </>
+        )
+      }}
+    </ListState>
+  )
+}
+
+function TaglineDialog({ product, onClose, onSaved }: { product: AdminEsProduct; onClose: () => void; onSaved: (c: AdminEsCatalogue) => void }) {
+  const toast = useToast()
+  const [v, setV] = useState<LocalizedText>(product.tagline ?? { en: '', st: '' })
+  const [busy, setBusy] = useState(false)
+  const [serverError, setServerError] = useState<string | null>(null)
+  const save = async (e: FormEvent) => {
+    e.preventDefault()
+    setBusy(true)
+    setServerError(null)
+    try {
+      const tagline = v.en.trim() ? { en: v.en.trim(), st: v.st.trim() } : null
+      onSaved(await api.ecosure.productText(product.code, { tagline }))
+      toast.success(tagline ? `Tagline saved for ${product.name}.` : `Tagline removed from ${product.name}.`)
+      onClose()
+    } catch (err) {
+      setServerError(errorMessage(err))
+      setBusy(false)
+    }
+  }
+  return (
+    <Dialog
+      title={`Tagline · ${product.name}`}
+      description="The line under the package name in the app. Leave English empty to show the name only."
+      onClose={busy ? () => {} : onClose}
+      size="sm"
+    >
+      <form onSubmit={save} noValidate>
+        <Field label="English">{(p) => <input {...p} maxLength={120} value={v.en} onChange={(e) => setV({ ...v, en: e.target.value })} data-autofocus />}</Field>
+        <Field label="Sesotho" hint="Empty: the app shows the English line.">
+          {(p) => <input {...p} lang="st" maxLength={120} value={v.st} onChange={(e) => setV({ ...v, st: e.target.value })} />}
+        </Field>
+        {serverError && (
+          <p className="form-error" role="alert">
+            {serverError}
+          </p>
+        )}
+        <div className="dialog-foot">
+          <Button onClick={onClose} disabled={busy}>
+            Cancel
+          </Button>
+          <Button type="submit" variant="primary" busy={busy}>
+            Save
+          </Button>
+        </div>
+      </form>
+    </Dialog>
+  )
+}
+
+function ContentCard({ content, onSaved }: { content: EsContent; onSaved: (c: AdminEsCatalogue) => void }) {
+  const toast = useToast()
+  const [v, setV] = useState<EsContent>(content)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string>()
+  const save = async (e: FormEvent) => {
+    e.preventDefault()
+    if (!v.terms.en.trim()) return setError('The English Ts&Cs are required.')
+    setError(undefined)
+    setBusy(true)
+    try {
+      onSaved(await api.ecosure.content({ terms: { en: v.terms.en.trim(), st: v.terms.st.trim() }, callCentre: v.callCentre?.trim() || null }))
+      toast.success('EcoSure texts saved. The app shows them the next time EcoSure opens.')
+    } catch (err) {
+      toast.error(errorMessage(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <Card title="Ts&Cs and call centre">
+      <form onSubmit={save} noValidate>
+        <Field label="Ts&Cs (English)" error={error} hint="Shown before a customer buys cover.">
+          {(p) => <textarea {...p} rows={5} maxLength={2000} value={v.terms.en} onChange={(e) => setV({ ...v, terms: { ...v.terms, en: e.target.value } })} />}
+        </Field>
+        <Field label="Ts&Cs (Sesotho)" hint="Empty: the app shows the English text.">
+          {(p) => <textarea {...p} lang="st" rows={5} maxLength={2000} value={v.terms.st} onChange={(e) => setV({ ...v, terms: { ...v.terms, st: e.target.value } })} />}
+        </Field>
+        <Field label="Call centre number" hint="Shown under Help in EcoSure. Empty: customers are pointed to the EcoSure chat.">
+          {(p) => <input {...p} inputMode="tel" maxLength={40} value={v.callCentre ?? ''} onChange={(e) => setV({ ...v, callCentre: e.target.value })} />}
+        </Field>
+        <div className="dialog-foot">
+          <WriteButton type="submit" variant="primary" busy={busy}>
+            Save texts
+          </WriteButton>
+        </div>
+      </form>
     </Card>
   )
 }

@@ -4,6 +4,7 @@
 import { router, useLocalSearchParams } from 'expo-router'
 import { useMemo, useState } from 'react'
 import { Alert, Text, View } from 'react-native'
+import { useLocalized } from '../../../lib/services'
 import type { EsCover, EsProduct } from '../../../../shared/api'
 import { useAppState } from '../../../state/AppState'
 import { useAuth } from '../../../state/Auth'
@@ -73,16 +74,15 @@ export default function QuoteDetails() {
   const { state } = useAppState()
   const { fail } = useMoqoqo()
   const { products, policy, error, refresh } = useEcoSure()
+  const loc = useLocalized()
   const isFuneral = params.product === 'funeral'
   const { docs, add, remove, busy } = useDocuments()
   // Before sign-in (the standalone EcoSure app): cover and prices only. A quote needs a profile: the guest creates
   // one first (the usual sign-up), then comes back to this quote to finish it.
   const guest = useAuth().status === 'signedOut'
 
-  const funeral = useMemo(() => {
-    const cheapest = (p: EsProduct) => Math.min(...p.options.map((o) => o.monthlyPremium))
-    return (products ?? []).filter((p) => p.line === 'funeral').sort((a, b) => cheapest(a) - cheapest(b))
-  }, [products])
+  // Funeral packages in EcoSure's order (from the server), only those that offer the chosen cover.
+  const funeral = useMemo(() => (products ?? []).filter((p) => p.line === 'funeral'), [products])
   const [cover, setCover] = useState<EsCover>(params.cover === 'single' ? 'single' : 'family')
   const [pickedCode, setCode] = useState<string | null>(null)
   const [pickedOption, setOption] = useState('')
@@ -96,8 +96,11 @@ export default function QuoteDetails() {
   const [consent, setConsent] = useState(false)
   const [sending, setSending] = useState(false)
 
-  // Funeral starts on EcoSure Standard (or the first package); other products are the one in the link.
-  const code = pickedCode ?? (isFuneral ? funeral.find((p) => p.code === 'FUN-STD')?.code ?? funeral[0]?.code : params.product)
+  // Funeral starts on the package marked most popular in the portal (or the first); other products are the one in the link.
+  const offered = funeral.filter((p) => p.options.some((o) => o.cover === cover))
+  const code = isFuneral
+    ? (offered.find((p) => p.code === pickedCode) ?? offered.find((p) => p.popular) ?? offered[0])?.code
+    : pickedCode ?? params.product
   const product = products?.find((p) => p.code === code)
   const title = isFuneral ? t.funeralQuote : product ? t.productQuote(product.name) : t.quotesTitle
 
@@ -200,7 +203,7 @@ export default function QuoteDetails() {
           {funeral.map((p) => {
             const price = p.options.find((o) => o.cover === cover)?.monthlyPremium
             return price === undefined ? null : (
-              <PackageCard key={p.code} title={p.name} tagline={t.taglines[p.code]} price={t.perMonth(maloti(price))} selected={p.code === product.code} onPress={() => setCode(p.code)} />
+              <PackageCard key={p.code} title={p.name} tagline={p.tagline ? loc(p.tagline) : undefined} price={t.perMonth(maloti(price))} selected={p.code === product.code} onPress={() => setCode(p.code)} />
             )
           })}
           {policy ? <Notice tone="info" text={`${t.myCover}: ${policy.packageName} ${coverName(policy.cover, t)} (${policy.number}).`} /> : null}

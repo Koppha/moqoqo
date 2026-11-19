@@ -9,9 +9,10 @@ import { useAppState } from '../../state/AppState'
 import { useDialogs } from '../../state/Dialogs'
 import { useMoqoqo } from '../../state/useMoqoqo'
 import { ecosure } from '../../miniapps/ecosure/api'
-import { funeralPackages, useEcoSure } from '../../miniapps/ecosure/data'
+import { defaultPackage, funeralPackages, packagesFor, useEcoSure } from '../../miniapps/ecosure/data'
 import { coverName, maloti, maskDate, normaliseMsisdn, parseDate } from '../../miniapps/ecosure/format'
 import { useEsT } from '../../miniapps/ecosure/strings'
+import { useLocalized } from '../../lib/services'
 import { es, esType, space } from '../../miniapps/ecosure/theme'
 import { Card, Checkbox, EsIcon, EsScreen, Field, Loading, Notice, OptionRow, PrimaryButton, Segmented } from '../../miniapps/ecosure/ui'
 
@@ -23,23 +24,27 @@ export default function BuyCover() {
   const { state } = useAppState()
   const { askPin } = useDialogs()
   const { settled, fail } = useMoqoqo()
-  const { products, setPolicy } = useEcoSure()
+  const { products, content, setPolicy } = useEcoSure()
+  const loc = useLocalized()
   const packages = funeralPackages(products)
   const [step, setStep] = useState<Step>(1)
   const [accepted, setAccepted] = useState(false)
   const [d, setD] = useState({ idNumber: '', fullName: state.me?.name ?? '', dob: '', gender: '' as '' | 'female' | 'male', beneficiaryName: '', beneficiaryMsisdn: '' })
   const [cover, setCover] = useState<EsCover>(params.cover === 'single' ? 'single' : 'family')
-  const [code, setCode] = useState(params.code ?? 'FUN-STD')
+  const [code, setCode] = useState(params.code ?? null)
   const [paying, setPaying] = useState(false)
 
   if (!products) return <EsScreen title={t.step(step)}><Loading /></EsScreen>
-  const pkg = packages.find((p) => p.code === code) ?? packages[0]
+  const offered = packagesFor(packages, cover)
+  const pkg = offered.find((p) => p.code === code) ?? defaultPackage(offered) ?? packages[0]
+  const terms = content ? loc(content.terms) : null
   const premium = pkg.premium[cover]
   const set = (k: keyof typeof d) => (v: string) => setD({ ...d, [k]: v })
   const back = () => (step === 1 ? router.back() : setStep((step - 1) as Step))
 
   const next = async () => {
     if (step === 1) {
+      if (!terms) return
       if (!accepted) return Alert.alert(t.terms, t.mustAgree)
       return setStep(2)
     }
@@ -49,7 +54,13 @@ export default function BuyCover() {
       if (d.beneficiaryMsisdn.trim() && !normaliseMsisdn(d.beneficiaryMsisdn)) return Alert.alert(t.beneficiary, t.badNumber)
       return setStep(3)
     }
-    if (step === 3) return setStep(4)
+    if (step === 3) {
+      if (pkg.terms[cover]?.beneficiaryRequired && !d.beneficiaryName.trim()) {
+        Alert.alert(t.beneficiary, t.needsBeneficiary)
+        return setStep(2)
+      }
+      return setStep(4)
+    }
     const pin = await askPin({ amount: premium, label: `${pkg.name} · ${coverName(cover, t)}` })
     if (!pin) return
     setPaying(true)
@@ -78,7 +89,7 @@ export default function BuyCover() {
       {step === 1 ? (
         <>
           <Text style={esType.h2}>{t.terms}</Text>
-          <Card><Text style={{ fontSize: 14, lineHeight: 22, color: es.textSoft }}>{t.termsText}</Text></Card>
+          <Card><Text style={{ fontSize: 14, lineHeight: 22, color: es.textSoft }}>{terms ?? '…'}</Text></Card>
           <Checkbox checked={accepted} onToggle={() => setAccepted(!accepted)} label={t.agree} />
         </>
       ) : null}
@@ -107,8 +118,9 @@ export default function BuyCover() {
           <Text style={esType.label}>{t.coverType}</Text>
           <Segmented options={[{ value: 'family' as const, label: t.cover.family, icon: 'users' }, { value: 'single' as const, label: t.cover.single, icon: 'user' }]} value={cover} onChange={setCover} />
           <Text style={esType.label}>{t.package}</Text>
-          {packages.map((p) => (
-            <OptionRow key={p.code} title={p.name} value={t.perMonth(maloti(p.premium[cover]))} selected={p.code === pkg.code} onPress={() => setCode(p.code)} />
+          {offered.map((p) => (
+            <OptionRow key={p.code} title={p.name} value={t.perMonth(maloti(p.premium[cover]))} selected={p.code === pkg.code} onPress={() => setCode(p.code)}
+              sub={p.terms[cover]?.sumAssured ? t.coverTerms(maloti(p.terms[cover]!.sumAssured!), p.terms[cover]!.waitingMonths) : undefined} />
           ))}
           <Text style={esType.small}>{t.priceNote}</Text>
         </>
@@ -121,6 +133,7 @@ export default function BuyCover() {
             <Text style={esType.small}>{t.summary}</Text>
             <Text style={{ fontSize: 17, fontWeight: '700', color: es.text }}>{pkg.name} · {coverName(cover, t)}</Text>
             <Text style={{ fontSize: 22, fontWeight: '800', color: es.primary }}>{t.perMonth(maloti(premium))}</Text>
+            {pkg.terms[cover]?.sumAssured ? <Text style={esType.small}>{t.coverTerms(maloti(pkg.terms[cover]!.sumAssured!), pkg.terms[cover]!.waitingMonths)}</Text> : null}
             <Text style={esType.small}>{d.fullName} · {d.dob}{d.beneficiaryName ? ` · ${t.beneficiary}: ${d.beneficiaryName}` : ''}</Text>
           </Card>
           <Text style={esType.label}>{t.payWith}</Text>

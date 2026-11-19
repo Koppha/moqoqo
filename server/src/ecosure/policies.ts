@@ -28,7 +28,7 @@ import { moneyResult } from '../services/money'
 import { checkPin } from '../services/pins'
 import { displayName, requireWallet, type UserRow } from '../services/users'
 import { addMonths, firstName, formatDate, isDate, notify, todayMaseru, ecosureAccount } from './account'
-import { coverPremiumCents, loadProducts, requireProduct, type Product } from './catalogue'
+import { coverPremiumCents, loadProducts, requireBeneficiary, requireProduct, type Product } from './catalogue'
 
 export interface PolicyRow {
   id: string
@@ -246,6 +246,7 @@ export async function buy(ctx: Ctx, me: UserRow, body: EsBuyBody): Promise<EsBuy
   const beneficiaryName = cleanText(body.beneficiaryName, 80, 'beneficiaryName')
   const beneficiaryMsisdn = body.beneficiaryMsisdn?.trim() ? normalizeMsisdn(body.beneficiaryMsisdn, 'beneficiaryMsisdn') : null
   if (beneficiaryMsisdn && !beneficiaryName) throw validation('beneficiaryName is required with beneficiaryMsisdn')
+  requireBeneficiary(product, body.cover, beneficiaryName)
   const existing = await openFuneralPolicy(ctx.db, me.id)
   if (existing) throw conflict(`You already have EcoSure funeral cover (${existing}). Change your package instead`)
   await checkPin(ctx.db, me, body.pin)
@@ -306,6 +307,7 @@ export async function updatePolicy(ctx: Ctx, me: UserRow, id: string, body: EsUp
       beneficiaryMsisdn = body.beneficiaryMsisdn.trim() ? normalizeMsisdn(body.beneficiaryMsisdn, 'beneficiaryMsisdn') : null
     }
     if (beneficiaryMsisdn && !beneficiaryName) throw validation('beneficiaryName is required with beneficiaryMsisdn')
+    requireBeneficiary(changedPackage ?? (await loadProducts(q, { codes: [productCode] }))[0], r.cover, beneficiaryName)
     await q.query(
       'UPDATE ecosure_policies SET product_code = $2, premium_cents = $3, beneficiary_name = $4, beneficiary_msisdn = $5 WHERE id = $1',
       [id, productCode, premiumCents, beneficiaryName, beneficiaryMsisdn],
@@ -330,6 +332,7 @@ export async function migratePolicy(ctx: Ctx, me: UserRow, id: string, cover: Es
     if (r.cover === cover) throw validation(`This policy is already ${coverName(cover)} cover`)
     const [product] = await loadProducts(q, { codes: [r.product_code] })
     const premiumCents = coverPremiumCents(product, cover)
+    requireBeneficiary(product, cover, r.beneficiary_name)
     await q.query('UPDATE ecosure_policies SET cover = $2, premium_cents = $3 WHERE id = $1', [id, cover, premiumCents])
     let removed = 0
     if (cover === 'single') {

@@ -29,6 +29,8 @@ export interface Config {
   simSwapWebhookSecret: string | null
   /** Econet's SIM swap API (ECONET_SIMSWAP_URL + ECONET_SIMSWAP_KEY); null = MockSimSwap (swaps simulated in the portal). */
   econetSimSwap: { url: string; key: string; header: string; cacheSeconds: number; timeoutMs: number } | null
+  /** EcoSure policy manager package list (funeral prices and cover terms); null = keep the catalogue in the database. */
+  ecosurePackages: { url: string; syncMinutes: number; timeoutMs: number } | null
   /** Per-connection limit on sign-in, PIN and sign-up attempts (on unless RATE_LIMIT=false). */
   rateLimit: boolean
   /** Android SMS Retriever app hashes per app, from SMS_APP_HASHES="customer:AbC123xyZ_1,business:…". */
@@ -77,6 +79,13 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
           header: env.ECONET_SIMSWAP_HEADER?.trim() || 'Authorization',
           cacheSeconds: Number(env.ECONET_SIMSWAP_CACHE_SECONDS) > 0 ? Number(env.ECONET_SIMSWAP_CACHE_SECONDS) : 300,
           timeoutMs: 4000,
+        }
+      : null,
+    ecosurePackages: env.ECOSURE_PACKAGES_URL?.trim()
+      ? {
+          url: env.ECOSURE_PACKAGES_URL.trim(),
+          syncMinutes: Number(env.ECOSURE_PACKAGES_SYNC_MINUTES) > 0 ? Number(env.ECOSURE_PACKAGES_SYNC_MINUTES) : 60,
+          timeoutMs: 8000,
         }
       : null,
     rateLimit: env.RATE_LIMIT !== 'false',

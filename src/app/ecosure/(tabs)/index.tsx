@@ -6,7 +6,7 @@ import { MiniAppIcon } from '../../../components/MiniAppIcon'
 import { useAppState } from '../../../state/AppState'
 import { useMoqoqo } from '../../../state/useMoqoqo'
 import { ecosure } from '../../../miniapps/ecosure/api'
-import { useEcoSure } from '../../../miniapps/ecosure/data'
+import { cheapestFuneral, useEcoSure } from '../../../miniapps/ecosure/data'
 import { coverName, maloti, showDate, statusName, statusTone } from '../../../miniapps/ecosure/format'
 import { useEsT } from '../../../miniapps/ecosure/strings'
 import { es, esRadius, esType, space, type EsGradient } from '../../../miniapps/ecosure/theme'
@@ -25,12 +25,19 @@ export default function EcoSureHome() {
   const insets = useSafeAreaInsets()
   const { state } = useAppState()
   const { toast, fail } = useMoqoqo()
-  const { policy, sponsorships, error, refresh } = useEcoSure()
+  const { products, content, policy, sponsorships, error, refresh } = useEcoSure()
   const [slide, setSlide] = useState(0)
   const firstName = (state.me?.name ?? '').split(' ')[0]
   const requests = sponsorships?.forMe.filter((x) => x.status === 'awaiting') ?? []
   const sl = SLIDES[slide]
-  const copy = t.slides[slide]
+  // Prices in the banner and cards come from the live catalogue; without it, the same words without a price.
+  const familyFrom = cheapestFuneral(products, 'family')
+  const singleFrom = cheapestFuneral(products, 'single')
+  const copy = slide === 0 && familyFrom != null ? { ...t.slides[0], title: t.slideFamilyFrom(familyFrom) } : t.slides[slide]
+  const cardSub = (key: keyof typeof t.cards) =>
+    key === 'family' && familyFrom != null ? t.withFrom(t.cards.family.sub, familyFrom)
+      : key === 'single' && singleFrom != null ? t.withFrom(t.cards.single.sub, singleFrom)
+        : t.cards[key].sub
 
   const answer = async (id: string, action: 'accept' | 'decline') => {
     try {
@@ -70,7 +77,7 @@ export default function EcoSureHome() {
           </View>
         </View>
         <View style={{ flexDirection: 'row', gap: 10 }}>
-          <Pressable accessibilityRole="button" accessibilityLabel={t.help} onPress={() => toast(t.helpText)}
+          <Pressable accessibilityRole="button" accessibilityLabel={t.help} onPress={() => toast(t.helpText(content?.callCentre ?? null))}
             style={{ width: 40, height: 40, borderRadius: 20, borderWidth: 1, borderColor: es.border, backgroundColor: es.surface, alignItems: 'center', justifyContent: 'center' }}>
             <EsIcon name="headset" size={20} color={es.text} />
           </Pressable>
@@ -153,7 +160,7 @@ export default function EcoSureHome() {
             <EsIcon name={c.icon} color="#fff" size={32} />
           </View>
           <Text style={{ color: '#fff', fontSize: 16, fontWeight: '800' }}>{t.cards[c.key].title}</Text>
-          <Text style={{ color: '#fff', fontSize: 12, maxWidth: 200 }}>{t.cards[c.key].sub}</Text>
+          <Text style={{ color: '#fff', fontSize: 12, maxWidth: 200 }}>{cardSub(c.key)}</Text>
           <Pressable accessibilityRole="button" onPress={() => router.push(c.to)} style={{ alignSelf: 'flex-start', backgroundColor: '#fff', borderRadius: 16, paddingHorizontal: 14, minHeight: 32, justifyContent: 'center', marginTop: 4 }}>
             <Text style={{ color: c.ink, fontSize: 12, fontWeight: '700' }}>{t.explore}</Text>
           </Pressable>

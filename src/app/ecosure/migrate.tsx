@@ -21,7 +21,7 @@ export default function Migrate() {
 
   const pkg = funeralPackages(products).find((p) => p.code === policy.productCode)
   const to: EsCover = policy.cover === 'family' ? 'single' : 'family'
-  const price = pkg ? maloti(pkg.premium[to]) : '—'
+  const price = pkg?.terms[to] ? maloti(pkg.premium[to]) : '—'
   const dependants = policy.members.filter((m) => m.relationship !== 'main').length
   const option = to === 'single'
     ? { title: t.toSingle, sub: t.toSingleSub(price) }

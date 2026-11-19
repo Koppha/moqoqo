@@ -66,8 +66,11 @@ import type { BillCategory, BillCategoryBody,
   BoundDevice,
   CreateUserBody,
   ErrorCode,
+  AdminEsCatalogue,
   EsClaim,
   EsClaimDecisionBody,
+  EsContent,
+  EsProductTextBody,
   EsClaimStatus,
   EsPolicy,
   EsPolicyStatus,
@@ -387,6 +390,11 @@ export const api = {
     /** Not in shared/api.ts: the server also serves a quote's documents. */
     quoteDocument: (reference: string, index: number) =>
       requestBlob(`${A}/ecosure/quotes/${encodeURIComponent(reference)}/documents/${index}`),
+    catalogue: () => request<AdminEsCatalogue>('GET', `${A}/ecosure/catalogue`),
+    syncCatalogue: () => request<AdminEsCatalogue>('POST', `${A}/ecosure/catalogue/sync`, { body: {} }),
+    productText: (code: string, body: EsProductTextBody) =>
+      request<AdminEsCatalogue>('PATCH', `${A}/ecosure/products/${encodeURIComponent(code)}`, { body }),
+    content: (body: EsContent) => request<AdminEsCatalogue>('PUT', `${A}/ecosure/content`, { body }),
   },
 
   appConfig: {

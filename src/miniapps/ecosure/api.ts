@@ -1,6 +1,6 @@
 // EcoSure calls, on EcoCash Super App's API client (same session, errors and maintenance handling).
 import type {
-  EsAddMemberBody, EsBuyBody, EsBuyResult, EsClaim, EsClaimBody, EsCover, EsPayBody, EsPayment, EsPayResult, EsPolicy,
+  EsAddMemberBody, EsBuyBody, EsBuyResult, EsClaim, EsClaimBody, EsContent, EsCover, EsPayBody, EsPayment, EsPayResult, EsPolicy,
   EsPolicyLookup, EsProduct, EsQuote, EsQuoteBody, EsSponsorship, EsSponsorships, EsUpdatePolicyBody, EsUpload, EsUploadBody,
 } from '../../../shared/api'
 import { api } from '../../lib/api'
@@ -9,6 +9,8 @@ const base = '/v1/ecosure'
 
 export const ecosure = {
   products: () => api<EsProduct[]>(`${base}/products`),
+  /** Ts&Cs and the call centre number, set in the portal. */
+  content: () => api<EsContent>(`${base}/content`),
   policies: () => api<EsPolicy[]>(`${base}/policies`),
   buy: (body: EsBuyBody) => api<EsBuyResult>(`${base}/policies`, { body }),
   update: (id: string, body: EsUpdatePolicyBody) => api<EsPolicy>(`${base}/policies/${id}`, { method: 'PATCH', body }),

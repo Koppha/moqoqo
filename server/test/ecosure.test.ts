@@ -82,9 +82,12 @@ describe('EcoSure catalogue', () => {
       pricing: 'fixed',
       underwriter: 'LNIG Hollard',
       options: [
-        { label: 'Family cover', cover: 'family', monthlyPremium: 84 },
-        { label: 'Single cover', cover: 'single', monthlyPremium: 60 },
+        { label: 'Family cover', cover: 'family', monthlyPremium: 84, sumAssured: 30000, waitingMonths: 0 },
+        { label: 'Single cover', cover: 'single', monthlyPremium: 60, sumAssured: 30000, waitingMonths: 3, beneficiaryRequired: true },
       ],
+      extendedMember: { monthlyPremium: 60, sumAssured: 30000 },
+      tagline: { en: 'Our most popular cover', st: 'Tšireletso e ratoang ka ho fetisisa' },
+      popular: true,
       quoteFields: [],
       claimDocuments: FUNERAL_DOCS,
     })
@@ -284,6 +287,10 @@ describe('EcoSure: members and changes', () => {
   })
 
   it('migrating to single removes the dependants; back to family keeps the package', async () => {
+    // Premium single cover needs a beneficiary (EcoSure's package list), and the last test removed it.
+    const none = await t.call('POST', `/v1/ecosure/policies/${policy.id}/migrate`, { cover: 'single' }, lerato.token)
+    expect(none.body.error).toMatchObject({ code: 'VALIDATION', message: expect.stringContaining('beneficiary') })
+    await t.call('PATCH', `/v1/ecosure/policies/${policy.id}`, { beneficiaryName: 'Thabo' }, lerato.token)
     const single = await t.call('POST', `/v1/ecosure/policies/${policy.id}/migrate`, { cover: 'single' }, lerato.token)
     expect(single.status).toBe(200)
     expect(single.body).toMatchObject({ cover: 'single', premium: 100, packageName: 'EcoSure Premium' })

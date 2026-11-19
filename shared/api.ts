@@ -1175,8 +1175,9 @@ export interface AdminCause extends CauseCard { organiser: PublicUser; balance: 
 // identity, the EcoCash Super App PIN confirms money and claims, and premiums are paid from the EcoCash wallet into the EcoSure
 // system wallet. Until the real EcoSure API exists, policies, claims, quotes and sponsorships live in this server behind
 // server/src/ecosure (like the EcoCash mock). Customer updates arrive as messages in the official "EcoSure" chat.
-// Prices are EcoSure's BRS figures, still to be confirmed by SEFS; dependant limits, waiting periods and cover
-// amounts are TBC (ECOSURE_DEPENDANT_LIMIT null = no limit enforced).
+// Funeral prices, cover amounts, waiting periods and beneficiary rules come from EcoSure's policy manager package
+// list (server/src/ecosure/sync.ts, ECOSURE_PACKAGES_URL); dependant limits are TBC (ECOSURE_DEPENDANT_LIMIT null =
+// no limit enforced).
 
 export type EsLine = 'funeral' | 'short_term'
 export type EsCategory = 'funeral' | 'motor_vehicle' | 'device' | 'house_contents' | 'house_owners' | 'sme'
@@ -1192,11 +1193,50 @@ export interface EsProduct {
   pricing: 'fixed' | 'quoted'
   underwriter: string
   /** Funeral options carry `cover`; SME options are business sizes. */
-  options: { label: string; cover?: EsCover; monthlyPremium: number }[]
+  options: EsOption[]
+  /** Funeral: the monthly price of each extended family member (EcoSure's Extended package), when offered. */
+  extendedMember?: { monthlyPremium: number; sumAssured: number }
+  /** Set in the portal: a line under the package name, and the package the app picks first. */
+  tagline?: LocalizedText
+  popular?: boolean
   quoteFields: { label: string; type: EsFieldType; required: boolean; choices: string[] }[]
   claimDocuments: string[]
 }
+export interface EsOption {
+  label: string
+  cover?: EsCover
+  monthlyPremium: number
+  /** From EcoSure's package list (funeral): what it pays out, months before cover starts, beneficiary required. */
+  sumAssured?: number
+  waitingMonths?: number
+  beneficiaryRequired?: boolean
+}
 /** GET /v1/ecosure/products → EsProduct[]: the live catalogue, funeral first, each line cheapest first. */
+/** GET /v1/ecosure/content → EsContent: the EcoSure texts set in the portal. */
+export interface EsContent {
+  terms: LocalizedText
+  /** The EcoSure call centre number, or null until it is set. */
+  callCentre: string | null
+}
+/**
+ * Portal › EcoSure › Catalogue. GET /admin/v1/ecosure/catalogue → AdminEsCatalogue. Prices and cover terms come from
+ * EcoSure's package list (read only here); PATCH /admin/v1/ecosure/products/:code {tagline?, popular?} and
+ * PUT /admin/v1/ecosure/content EsContent change the words.
+ */
+export interface AdminEsProduct extends EsProduct {
+  status: 'active' | 'draft' | 'retired'
+  /** EcoSure package group this funeral package follows (STANDARD …); null for products EcoSure doesn't list. */
+  ecosureGroup: string | null
+  /** EcoSure package ids behind it: single, family, extended. */
+  packageIds: string[]
+}
+export interface AdminEsCatalogue {
+  products: AdminEsProduct[]
+  content: EsContent
+  /** The last sync with EcoSure's package list; null if it never ran (no ECOSURE_PACKAGES_URL). */
+  sync: { at: string; ok: boolean; packages: number; updated: number; skipped: string[]; error?: string } | null
+}
+export interface EsProductTextBody { tagline?: LocalizedText | null; popular?: boolean }
 export const ECOSURE_DEPENDANT_LIMIT: number | null = null
 
 export type EsRelationship = 'main' | 'spouse' | 'child' | 'parent' | 'extended'

@@ -8,7 +8,7 @@ import { useLightStatusBar } from '../components/useLightStatusBar'
 import { LANGS, STRINGS, useLanguage } from '../i18n'
 import { FORM_MAX } from '../lib/layout'
 import { ecosure } from '../miniapps/ecosure/api'
-import { funeralPackages } from '../miniapps/ecosure/data'
+import { cheapestFuneral } from '../miniapps/ecosure/data'
 import { useEsT } from '../miniapps/ecosure/strings'
 import { es, esRadius, esType, space, type EsGradient } from '../miniapps/ecosure/theme'
 import { EsIcon, Gradient, Notice, OutlineButton, type EsIconName } from '../miniapps/ecosure/ui'
@@ -28,8 +28,7 @@ export default function Welcome() {
   }, [])
 
   // "From M30 a month" from the live catalogue once it has loaded; the built-in wording until then.
-  const funeral = funeralPackages(products)
-  const cheapest = (cover: 'family' | 'single') => (funeral.length ? Math.min(...funeral.map((p) => p.premium[cover])) : null)
+  const cheapest = (cover: 'family' | 'single') => cheapestFuneral(products, cover)
   const cards: { key: 'family' | 'single' | 'shortTerm'; gradient: EsGradient; ink: string; icon: EsIconName; to: Href; sub: string }[] = [
     { key: 'family', gradient: 'family', ink: es.primary, icon: 'users', to: { pathname: '/ecosure/quote/[product]', params: { product: 'funeral', cover: 'family' } },
       sub: cheapest('family') != null ? t.from(cheapest('family')!) : t.cards.family.sub },

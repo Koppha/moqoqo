@@ -4,7 +4,7 @@ import { Pressable, Text, View } from 'react-native'
 import { Sheet } from '../../../components/Sheet'
 import { useMoqoqo } from '../../../state/useMoqoqo'
 import { ecosure } from '../../../miniapps/ecosure/api'
-import { funeralPackages, useEcoSure } from '../../../miniapps/ecosure/data'
+import { funeralPackages, packagesFor, useEcoSure } from '../../../miniapps/ecosure/data'
 import { coverName, maloti, normaliseMsisdn, relationName, showDate, statusName, statusTone } from '../../../miniapps/ecosure/format'
 import { useEsT } from '../../../miniapps/ecosure/strings'
 import { es, esRadius, esType, space } from '../../../miniapps/ecosure/theme'
@@ -105,7 +105,7 @@ export default function MyPolicy() {
 
       <Sheet visible={sheet === 'package'} title={t.changePackageTitle} onClose={() => setSheet(null)}>
         <View style={{ gap: space(2.5) }}>
-          {packages.map((p) => (
+          {packagesFor(packages, policy.cover).map((p) => (
             <OptionRow key={p.code} title={p.name} value={t.perMonth(maloti(p.premium[policy.cover]))} selected={p.code === code} onPress={() => setCode(p.code)} />
           ))}
           <Text style={esType.small}>{t.priceNote}</Text>

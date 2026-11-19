@@ -33,6 +33,8 @@ import { recordBlocked, RiskBlocked } from './services/risk'
 import { createSurveillanceSweeper } from './services/surveillance'
 import { aiRiskRoutes } from './routes/aiRisk'
 import { simSwapRoutes } from './routes/simSwap'
+import { createCatalogueSync } from './ecosure/sync'
+import { HttpEcosurePackages, type EcosurePackageSource } from './gateways/ecosurePackages'
 import { securityRoutes } from './routes/security'
 import { protect } from './lib/protect'
 import { analyticsRoutes } from './routes/analytics'
@@ -70,6 +72,7 @@ export interface BuiltApp {
   splitSweeper: ReturnType<typeof createSplitSweeper>
   /** Society loan reminders and expiry, hourly once started. */
   loanSweeper: ReturnType<typeof createLoanSweeper>
+  ecosureSync: ReturnType<typeof createCatalogueSync>
   /** Transaction surveillance (AML scenarios) every 15 minutes once started. */
   surveillance: ReturnType<typeof createSurveillanceSweeper>
   /** Reads Expo push receipts every few minutes once started. */
@@ -89,6 +92,8 @@ export interface AppDeps {
   services?: EcoCashServices
   homeAffairs?: HomeAffairs
   simSwap?: SimSwapSource
+  /** EcoSure's package list (tests pass a fake). Default: ECOSURE_PACKAGES_URL when set, else none. */
+  ecosurePackages?: EcosurePackageSource | null
   numberVerify?: NumberVerify
   sms?: SmsGateway
   email?: EmailGateway
@@ -151,6 +156,11 @@ export async function buildApp(opts: { config: Config; db: Db; logger?: boolean 
   const stopOrderSweeper = createStopOrderSweeper(ctx)
   const splitSweeper = createSplitSweeper(ctx)
   const loanSweeper = createLoanSweeper(ctx)
+  const ecosureSync = createCatalogueSync(
+    ctx,
+    opts.ecosurePackages !== undefined ? opts.ecosurePackages : config.ecosurePackages ? new HttpEcosurePackages(config.ecosurePackages) : null,
+    config.ecosurePackages?.syncMinutes ?? 60,
+  )
   ctx.onCredit = splitSweeper.onCredit
   const apiMetrics = createApiMetrics(db, app.log)
 
@@ -235,7 +245,7 @@ export async function buildApp(opts: { config: Config; db: Db; logger?: boolean 
   await wsRoutes(app, ctx)
   await adminRoutes(app, ctx, () => configWatcher.check(true))
   await ecosureRoutes(app, ctx)
-  await ecosureAdminRoutes(app, ctx)
+  await ecosureAdminRoutes(app, ctx, ecosureSync)
   await cardBankRoutes(app, ctx)
   await cardBankAdminRoutes(app, ctx)
   await remittanceRoutes(app, ctx)
@@ -276,6 +286,7 @@ export async function buildApp(opts: { config: Config; db: Db; logger?: boolean 
     splitSweeper.stop()
     push.stop()
     loanSweeper.stop()
+    ecosureSync.stop()
     surveillance.stop()
     apiMetrics.stop()
     await apiMetrics.flush()
@@ -283,5 +294,5 @@ export async function buildApp(opts: { config: Config; db: Db; logger?: boolean 
     await ctx.notifier.idle()
   })
 
-  return { app, ctx, configWatcher, intentSweeper, atmSweeper, stopOrderSweeper, splitSweeper, loanSweeper, surveillance, push, apiMetrics }
+  return { app, ctx, configWatcher, intentSweeper, atmSweeper, stopOrderSweeper, splitSweeper, loanSweeper, ecosureSync, surveillance, push, apiMetrics }
 }

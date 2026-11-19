@@ -1,12 +1,13 @@
 // EcoSure mini app (/v1/ecosure) and its back office (/admin/v1/ecosure). Contract: shared/api.ts "EcoSure".
 import type { FastifyInstance, FastifyReply } from 'fastify'
 import { z } from 'zod'
-import type { EsClaimStatus, EsPolicy, Page } from '../../../shared/api'
+import type { AdminEsCatalogue, EsClaimStatus, EsContent, EsPolicy, Page } from '../../../shared/api'
 import type { Ctx } from '../context'
-import { notFound } from '../errors'
+import { AppError, notFound } from '../errors'
 import { authAdmin, authUser, parse, zAmount, zId, zPage, zPin } from '../http'
 import { todayMaseru } from '../ecosure/account'
-import { catalogue } from '../ecosure/catalogue'
+import { adminProducts, catalogue, ecosureContent } from '../ecosure/catalogue'
+import { lastSync, type createCatalogueSync } from '../ecosure/sync'
 import { adminClaims, claimDocumentUploadId, decideClaim, myClaims, submitClaim, type AdminClaim } from '../ecosure/claims'
 import {
   addMember,
@@ -39,6 +40,7 @@ export async function ecosureRoutes(app: FastifyInstance, ctx: Ctx) {
 
   // The catalogue is public: the standalone EcoSure app shows cover and prices before sign-in (quotes need sign-in).
   app.get(`${E}/products`, async () => catalogue(ctx.db))
+  app.get(`${E}/content`, async (): Promise<EsContent> => ecosureContent(ctx.db))
 
   // ---------- policies ----------
   app.get(`${E}/policies`, auth, async (req) => myPolicies(ctx.db, req.user))
@@ -181,9 +183,51 @@ async function sendUpload(ctx: Ctx, reply: FastifyReply, uploadId: string) {
     .send(file.content)
 }
 
-export async function ecosureAdminRoutes(app: FastifyInstance, ctx: Ctx) {
+export async function ecosureAdminRoutes(app: FastifyInstance, ctx: Ctx, sync: ReturnType<typeof createCatalogueSync>) {
   const auth = { preHandler: authAdmin(ctx) }
   const A = '/admin/v1/ecosure'
+  const zLocalized = z.object({ en: z.string().trim().min(1).max(2000), st: z.string().trim().max(2000) })
+  const catalogueNow = async (): Promise<AdminEsCatalogue> => ({ products: await adminProducts(ctx.db), content: await ecosureContent(ctx.db), sync: await lastSync(ctx.db) })
+
+  // Catalogue: prices and cover terms come from EcoSure's package list; staff set the words around them.
+  app.get(`${A}/catalogue`, auth, catalogueNow)
+
+  app.post(`${A}/catalogue/sync`, auth, async (req) => {
+    if (!sync.enabled) throw new AppError('VALIDATION', 'EcoSure package list is not connected (ECOSURE_PACKAGES_URL)')
+    const r = await sync.sync()
+    await audit(ctx.db, req.admin, 'ecosure.catalogue.sync', 'ecosure:catalogue', r ? `${r.ok ? 'ok' : 'failed'}, ${r.updated} changes` : '')
+    return catalogueNow()
+  })
+
+  app.patch(`${A}/products/:code`, auth, async (req) => {
+    const { code } = parse(z.object({ code: z.string().trim().toUpperCase().max(40) }), req.params)
+    const body = parse(z.object({ tagline: zLocalized.nullable().optional(), popular: z.boolean().optional() }), req.body)
+    await ctx.db.tx(async (q) => {
+      const [p] = await q.query<{ line: string }>('SELECT line FROM ecosure_products WHERE code = $1', [code])
+      if (!p) throw notFound(`No EcoSure product ${code}`)
+      if (body.tagline !== undefined) await q.query('UPDATE ecosure_products SET tagline = $2 WHERE code = $1', [code, body.tagline ? JSON.stringify(body.tagline) : null])
+      if (body.popular !== undefined) {
+        // One "most popular" package per line.
+        if (body.popular) await q.query('UPDATE ecosure_products SET popular = false WHERE line = $1', [p.line])
+        await q.query('UPDATE ecosure_products SET popular = $2 WHERE code = $1', [code, body.popular])
+      }
+      await audit(q, req.admin, 'ecosure.product.text', `ecosure:${code}`, Object.keys(body).join(', '))
+    })
+    return catalogueNow()
+  })
+
+  app.put(`${A}/content`, auth, async (req) => {
+    const body = parse(z.object({ terms: zLocalized, callCentre: z.string().trim().max(40).nullable() }), req.body)
+    await ctx.db.tx(async (q) => {
+      await q.query(
+        `INSERT INTO ecosure_content (id, terms, call_centre, updated_at) VALUES (1, $1, $2, now())
+         ON CONFLICT (id) DO UPDATE SET terms = $1, call_centre = $2, updated_at = now()`,
+        [JSON.stringify(body.terms), body.callCentre || null],
+      )
+      await audit(q, req.admin, 'ecosure.content', 'ecosure:content')
+    })
+    return catalogueNow()
+  })
 
   app.get(`${A}/policies`, auth, async (req): Promise<Page<EsPolicy>> => {
     const query = parse(
