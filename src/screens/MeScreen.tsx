@@ -199,7 +199,11 @@ export default function MeScreen() {
             <Text style={m.username}>{user?.username ? `@${user.username}` : t.me.setUsername}</Text>
           </Pressable>
         </View>
-        <Icon name="qr-code-outline" size={26} color={colors.primary} />
+        {/* My QR: agents and merchants get their till QR, everyone else the receive-money QR (as the assistant's my_qr action does). */}
+        <Pressable accessibilityRole="button" accessibilityLabel={t.receive.myQr} hitSlop={10}
+          onPress={() => router.push(user?.code ? '/my-qr' : '/receive-money')}>
+          <Icon name="qr-code-outline" size={26} color={colors.primary} />
+        </Pressable>
       </Card>
       {mode === 'business' && (
         <Card style={{ marginTop: 14, paddingVertical: 4 }}>
