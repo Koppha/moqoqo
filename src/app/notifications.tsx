@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { ActivityIndicator, AppState, Linking, Pressable, StyleSheet, Switch, Text, TextInput, View } from 'react-native'
 import {
+  CODES_BY_EMAIL_MAX_DAYS,
   NOTIFY_CHANNELS,
   NOTIFY_MATRIX,
   type ChoosableCategory,
@@ -14,6 +15,7 @@ import { useT } from '../i18n'
 import { api } from '../lib/api'
 import { maskMsisdn } from '../lib/format'
 import { enableNotifications, getPushProblem, previewPush, pushPermission, type PushPermission } from '../lib/notifications'
+import { useDialogs } from '../state/Dialogs'
 import { useMoqoqo } from '../state/useMoqoqo'
 import { colors, radius } from '../theme'
 
@@ -188,11 +190,72 @@ export default function NotificationsScreen() {
               <Button label={settings.email ? t.notifications.emailChange : t.notifications.emailAdd} variant="ghost" onPress={() => setEmailOpen(true)} style={{ flex: 1 }} />
               {settings.email ? <Button label={t.notifications.emailRemove} variant="ghost" onPress={removeEmail} style={{ flex: 1 }} /> : null}
             </View>
+            {settings.emailVerified && <TravelCodes settings={settings} onChange={setSettings} />}
           </Card>
         </View>
       )}
       <EmailSheet visible={emailOpen} initial={settings?.email ?? ''} onClose={() => setEmailOpen(false)} onDone={(s) => { setSettings(s); setEmailOpen(false); toast(t.notifications.emailConfirmed) }} />
     </Screen>
+  )
+}
+
+const TRAVEL_DAYS = [7, 30, CODES_BY_EMAIL_MAX_DAYS]
+
+/**
+ * Inside the Email card, once the address is confirmed: while travelling, the code for setting up EcoCash on a phone
+ * comes to this email instead of by SMS, until a date. Off by default; on with the PIN; back to SMS when time is up.
+ */
+function TravelCodes({ settings, onChange }: { settings: NotificationSettings; onChange: (s: NotificationSettings) => void }) {
+  const t = useT()
+  const { fail, toast } = useMoqoqo()
+  const { askPin } = useDialogs()
+  const [days, setDays] = useState(30)
+  const [busy, setBusy] = useState(false)
+  const on = !!settings.codesByEmailUntil
+
+  const flip = async (next: boolean) => {
+    let pin: string | null = null
+    if (next) {
+      pin = await askPin({ label: t.notifications.travelPin })
+      if (!pin) return
+    }
+    setBusy(true)
+    try {
+      onChange(await api<NotificationSettings>('/v1/me/codes-by-email', { method: 'PUT', body: next ? { on: true, days, pin } : { on: false } }))
+      toast(next ? t.notifications.travelOn : t.notifications.travelOff)
+    } catch (e) {
+      fail(e)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const until = settings.codesByEmailUntil
+    ? new Date(settings.codesByEmailUntil).toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' })
+    : null
+  return (
+    <View style={n.travel}>
+      <View style={[n.row, { borderBottomWidth: 0, paddingHorizontal: 0, gap: 12 }]}>
+        <Icon name="airplane-outline" size={22} color={colors.primary} />
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text style={n.title}>{t.notifications.travelSwitch}</Text>
+          <Text style={n.sub}>{until ? t.notifications.travelUntil(until) : t.notifications.travelBody}</Text>
+        </View>
+        <Switch value={on} disabled={busy} onValueChange={flip} trackColor={{ true: colors.primary, false: colors.border }} thumbColor="#fff"
+          accessibilityLabel={t.notifications.travelSwitch} />
+      </View>
+      {!on && (
+        <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
+          <Text style={n.sub}>{t.notifications.travelFor}</Text>
+          {TRAVEL_DAYS.map((d) => (
+            <Pressable key={d} accessibilityRole="button" accessibilityState={{ selected: d === days }} onPress={() => setDays(d)}
+              style={[n.chip, d === days && n.chipOn]}>
+              <Text style={[n.chipText, d === days && n.chipTextOn]}>{t.notifications.travelDays(d)}</Text>
+            </Pressable>
+          ))}
+        </View>
+      )}
+    </View>
   )
 }
 
@@ -274,6 +337,11 @@ const n = StyleSheet.create({
   alwaysText: { fontSize: 12, fontWeight: '700', color: colors.primary },
   note: { fontSize: 12.5, color: colors.muted, marginTop: 10, paddingHorizontal: 4 },
   emailRow: { flexDirection: 'row', alignItems: 'center', marginTop: 6, gap: 8 },
+  travel: { marginTop: 14, paddingTop: 4, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
+  chip: { paddingHorizontal: 12, paddingVertical: 7, borderRadius: radius.pill, borderWidth: 1, borderColor: colors.border },
+  chipOn: { borderColor: colors.primary, backgroundColor: colors.primarySoft },
+  chipText: { fontSize: 13.5, color: colors.text },
+  chipTextOn: { color: colors.primary, fontWeight: '700' },
   badge: { fontSize: 12, fontWeight: '700', color: colors.success },
   input: { height: 52, borderRadius: radius.md, borderWidth: 1.5, borderColor: colors.border, backgroundColor: colors.surface, paddingHorizontal: 14, fontSize: 16, color: colors.text, marginBottom: 12 },
 })

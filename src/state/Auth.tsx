@@ -5,8 +5,9 @@ import { AppState } from 'react-native'
 import type { AppKind, EcoSureProfileStart, LoginResponse, LoginResult, Me, OnboardingStart } from '../../shared/api'
 import { checkPhone, getDeviceInfo } from '../lib/device'
 import { useT } from '../i18n'
-import { api, ApiFailure, setApiToken, setUnauthorizedHandler } from '../lib/api'
+import { api, ApiFailure, setApiToken, setTokenRotatedHandler, setUnauthorizedHandler } from '../lib/api'
 import { unregisterPush } from '../lib/notifications'
+import { forgetPayBiometric } from '../lib/payBiometric'
 import { clearAppShortcuts } from '../lib/shortcuts'
 import { APP } from '../lib/variant'
 import { displayHandoff } from '../theme'
@@ -280,7 +281,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       await api('/v1/auth/logout', { method: 'POST' }).catch(() => {})
     }
     setApiToken(null)
-    await Promise.all([SecureStore.deleteItemAsync(KEY_SESSION), SecureStore.deleteItemAsync(KEY_BIOMETRICS)])
+    await Promise.all([SecureStore.deleteItemAsync(KEY_SESSION), SecureStore.deleteItemAsync(KEY_BIOMETRICS), forgetPayBiometric()])
     setSession(null)
     setBiometrics((b) => ({ ...b, enabled: false }))
     setStatus('signedOut')
@@ -293,6 +294,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUnauthorizedHandler(() => { if (ownerRef.current) closeBusiness(false); else signOut(false) })
     return () => setUnauthorizedHandler(null)
   }, [signOut, closeBusiness])
+
+  // The server rotates the session token daily: keep the stored session on the new one (business session included).
+  useEffect(() => {
+    setTokenRotatedHandler((t) => setSession((s) => {
+      if (!s) return s
+      const next = { ...s, token: t }
+      SecureStore.setItemAsync(KEY_SESSION, JSON.stringify(next)).catch(() => {})
+      return next
+    }))
+    return () => setTokenRotatedHandler(null)
+  }, [])
 
   const startEcoSureProfile = useCallback(async (msisdn: string): Promise<ProfileStartResult> => {
     try {

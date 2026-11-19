@@ -1,7 +1,8 @@
 import { router, useLocalSearchParams } from 'expo-router'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { KeyboardAvoidingView, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
+import { listenForCode } from '../../modules/sms-retriever'
 import { OTP_LENGTH, type LoginResponse, type OnboardingIdentity, type OnboardingNext, type OnboardingOtpSent } from '../../shared/api'
 import { Button, CircleIconButton, Icon } from '../components/ui'
 import { useT } from '../i18n'
@@ -37,6 +38,9 @@ export default function Setup() {
   const [dob, setDob] = useState({ d: '', m: '', y: '' })
   const [gender, setGender] = useState<'female' | 'male' | null>(null)
   const [otp, setOtp] = useState('')
+  // Explicit consent before the app is registered on this phone (DFS guidelines 3.2.5). EcoSure profiles have their own terms.
+  const [terms, setTerms] = useState(false)
+  const needTerms = !profile && !terms
   // A profile's code went out when it started (on the sign-in screen).
   const [sent, setSent] = useState<OnboardingOtpSent | null>(profile && sentTo ? { sentTo, resendAfter: Number(resendAfter) || 30, ...(devCode ? { devCode } : {}) } : null)
   const [wait, setWait] = useState(profile ? Number(resendAfter) || 30 : 0)
@@ -96,7 +100,7 @@ export default function Setup() {
   })
 
   const verify = (code = otp) => run(async () => {
-    const res = await api<LoginResponse | OnboardingNext>(`/v1/onboarding/${id}/verify`, { body: { otp: code } })
+    const res = await api<LoginResponse | OnboardingNext>(`/v1/onboarding/${id}/verify`, { body: { otp: code, acceptTerms: profile ? undefined : terms } })
     if ('next' in res) return setStep('id')
     await completeSignIn(res)
     dispatch({ type: 'toast', text: t.setup.done })
@@ -108,6 +112,19 @@ export default function Setup() {
     await completeSignIn(res)
     dispatch({ type: 'toast', text: t.setup.profileDone })
   })
+
+  // Android: the code SMS fills itself in (SMS Retriever, DFS guidelines 3.2.5b-iv) and is checked straight away once
+  // the terms are accepted; listening restarts with each new code. iPhone offers it above the keyboard instead.
+  const latest = useRef({ needTerms, busy, verify })
+  useEffect(() => { latest.current = { needTerms, busy, verify } })
+  useEffect(() => {
+    if (step !== 'otp') return
+    return listenForCode(OTP_LENGTH, (code) => {
+      setOtp(code)
+      const l = latest.current
+      if (!l.needTerms && !l.busy) l.verify(code)
+    })
+  }, [step, sent])
 
   const order: Step[] = profile ? ['otp', 'id', 'confirm', 'pin'] : ['id', 'confirm', 'otp']
   const stepNo = order.indexOf(step) + 1
@@ -122,7 +139,7 @@ export default function Setup() {
         </View>
         {profile && step === 'otp' ? <Text style={s.kicker}>{t.setup.profileTitle}</Text> : null}
         <Text style={s.title}>{step === 'id' ? t.setup.idTitle : step === 'confirm' ? t.setup.confirmTitle : step === 'pin' ? t.setup.pinTitle : t.setup.otpTitle}</Text>
-        <Text style={s.sub}>{step === 'id' ? t.setup.idSub(msisdn ?? '') : step === 'confirm' ? t.setup.confirmSub : step === 'pin' ? t.setup.pinSub : t.setup.otpSub(sent?.sentTo ?? msisdn ?? '')}</Text>
+        <Text style={s.sub}>{step === 'id' ? t.setup.idSub(msisdn ?? '') : step === 'confirm' ? t.setup.confirmSub : step === 'pin' ? t.setup.pinSub : (sent?.channel === 'email' ? t.setup.otpSubEmail(sent.sentTo) : t.setup.otpSub(sent?.sentTo ?? msisdn ?? ''))}</Text>
 
         {step === 'id' && (
           <>
@@ -175,10 +192,21 @@ export default function Setup() {
               onChangeText={(v) => {
                 const code = v.replace(/\D/g, '').slice(0, OTP_LENGTH)
                 setOtp(code)
-                if (code.length === OTP_LENGTH) verify(code)
+                if (code.length === OTP_LENGTH && !needTerms) verify(code)
               }} />
             {sent?.devCode ? <Text style={s.devCode}>{t.setup.devCode(sent.devCode)}</Text> : null}
-            <Button label={busy ? t.setup.checking : t.setup.verify} disabled={busy || otp.length !== OTP_LENGTH} onPress={() => verify()} style={{ marginTop: 16 }} />
+            {!profile && (
+              <View style={s.check}>
+                <Pressable accessibilityRole="checkbox" accessibilityState={{ checked: terms }} onPress={() => setTerms(!terms)} style={s.termsTick}>
+                  <Icon name={terms ? 'checkbox' : 'square-outline'} size={24} color={terms ? colors.primary : colors.muted} />
+                  <Text style={s.checkText}>{t.setup.acceptTerms}</Text>
+                </Pressable>
+                <Pressable accessibilityRole="link" onPress={() => router.push('/legal')} hitSlop={8}>
+                  <Text style={s.resendText}>{t.setup.readTerms}</Text>
+                </Pressable>
+              </View>
+            )}
+            <Button label={busy ? t.setup.checking : t.setup.verify} disabled={busy || otp.length !== OTP_LENGTH || needTerms} onPress={() => verify()} style={{ marginTop: 16 }} />
             <Pressable accessibilityRole="button" disabled={wait > 0 || busy} onPress={resend} style={s.resend}>
               <Text style={[s.resendText, wait > 0 && { color: colors.muted }]}>{wait > 0 ? t.setup.resendIn(wait) : t.setup.resend}</Text>
             </Pressable>
@@ -218,6 +246,7 @@ const s = StyleSheet.create({
   nameLbl: { fontSize: 12, color: colors.muted },
   name: { fontSize: 19, fontWeight: '800', color: colors.text, marginTop: 2 },
   check: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 14, paddingVertical: 6 },
+  termsTick: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10 },
   checkText: { fontSize: 15, color: colors.text, flex: 1 },
   choice: { flex: 1, height: 50, borderRadius: radius.md, borderWidth: 1.5, borderColor: colors.border, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.surface },
   choiceOn: { backgroundColor: colors.primary, borderColor: colors.primary },

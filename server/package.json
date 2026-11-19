@@ -16,7 +16,8 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "admin:create": "tsx src/scripts/create-admin.ts",
-    "admin:set-login": "tsx src/scripts/set-admin-login.ts"
+    "admin:set-login": "tsx src/scripts/set-admin-login.ts",
+    "rotate-data-key": "tsx src/scripts/rotate-data-key.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.135.0",

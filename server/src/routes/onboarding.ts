@@ -24,8 +24,8 @@ export async function onboardingRoutes(app: FastifyInstance, ctx: Ctx) {
   app.post('/v1/onboarding/:id/resend', async (req) => resend(ctx, params(req)))
 
   app.post('/v1/onboarding/:id/verify', async (req) => {
-    const body = parse(z.object({ otp: z.string().trim().regex(/^\d{6}$/, 'The code has 6 digits') }), req.body)
-    return verify(ctx, params(req), body.otp)
+    const body = parse(z.object({ otp: z.string().trim().regex(/^\d{6}$/, 'The code has 6 digits'), acceptTerms: z.boolean().optional() }), req.body)
+    return verify(ctx, params(req), body.otp, body.acceptTerms === true)
   })
 
   // The standalone EcoSure app: create an EcoSure profile with the person's own PIN (or reset a forgotten one).
@@ -48,13 +48,13 @@ export async function onboardingAdminRoutes(app: FastifyInstance, ctx: Ctx) {
 
   app.get('/admin/v1/users/:id/devices', auth, async (req) => {
     const { id } = parse(z.object({ id: zId }), req.params)
-    return listDevices(ctx.db, id)
+    return listDevices(ctx.db, id, null, true)
   })
 
   app.post('/admin/v1/users/:id/devices/:deviceId/unbind', auth, async (req) => {
     const { id, deviceId } = parse(z.object({ id: zId, deviceId: zId }), req.params)
     await unbind(ctx, id, deviceId)
     await audit(ctx.db, req.admin, 'device.unbind', `user:${id}`, `device:${deviceId}`)
-    return listDevices(ctx.db, id)
+    return listDevices(ctx.db, id, null, true)
   })
 }

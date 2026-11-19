@@ -14,6 +14,8 @@ import { MockRemit, type RemitGateway } from './gateways/remit'
 import { MockCardGateway, type CardGateway } from './gateways/cards'
 import { MockEcoCashServices, type EcoCashServices } from './gateways/ecocash'
 import { MockHomeAffairs, type HomeAffairs } from './gateways/homeaffairs'
+import { EconetSimSwap, MockSimSwap, type SimSwapSource } from './gateways/simswap'
+import { MockNumberVerify, type NumberVerify } from './gateways/numberverify'
 import { MockEmail, MockSms, type EmailGateway, type SmsGateway } from './notify/gateways'
 import { createExpoPush, type ExpoPush } from './notify/expoPush'
 import { createNotifier } from './notify/index'
@@ -28,6 +30,11 @@ import { stopOrderRoutes } from './routes/stopOrders'
 import { createLoanSweeper } from './services/societyLoans'
 import { createSplitSweeper } from './services/splits'
 import { recordBlocked, RiskBlocked } from './services/risk'
+import { createSurveillanceSweeper } from './services/surveillance'
+import { aiRiskRoutes } from './routes/aiRisk'
+import { simSwapRoutes } from './routes/simSwap'
+import { securityRoutes } from './routes/security'
+import { protect } from './lib/protect'
 import { analyticsRoutes } from './routes/analytics'
 import { brandingRoutes } from './routes/branding'
 import { notificationAdminRoutes, notificationRoutes } from './routes/notifications'
@@ -50,6 +57,8 @@ import { createIntentSweeper } from './services/intents'
 import { activeMaintenance } from './services/maintenance'
 import { createApiMetrics } from './services/metrics'
 import { performanceRoutes } from './routes/performance'
+import { readFileSync } from 'node:fs'
+import { configureVault } from './lib/vault'
 
 export interface BuiltApp {
   app: FastifyInstance
@@ -61,6 +70,8 @@ export interface BuiltApp {
   splitSweeper: ReturnType<typeof createSplitSweeper>
   /** Society loan reminders and expiry, hourly once started. */
   loanSweeper: ReturnType<typeof createLoanSweeper>
+  /** Transaction surveillance (AML scenarios) every 15 minutes once started. */
+  surveillance: ReturnType<typeof createSurveillanceSweeper>
   /** Reads Expo push receipts every few minutes once started. */
   push: ExpoPush
   apiMetrics: ReturnType<typeof createApiMetrics>
@@ -77,6 +88,8 @@ export interface AppDeps {
   pinless?: PinlessGateway
   services?: EcoCashServices
   homeAffairs?: HomeAffairs
+  simSwap?: SimSwapSource
+  numberVerify?: NumberVerify
   sms?: SmsGateway
   email?: EmailGateway
   /** Expo push HTTP calls (tests pass a fake). */
@@ -87,7 +100,14 @@ export interface AppDeps {
 
 export async function buildApp(opts: { config: Config; db: Db; logger?: boolean } & AppDeps): Promise<BuiltApp> {
   const { config, db } = opts
+  // Encryption at rest for sensitive fields (DFS guidelines 3.2.6g); a malformed key stops the start.
+  configureVault(config.dataKeys)
+  // TLS 1.2+ when the server terminates it itself (DFS guidelines 3.2.4a–b); usually the proxy does.
+  const https = config.tlsCertFile && config.tlsKeyFile
+    ? { https: { cert: readFileSync(config.tlsCertFile), key: readFileSync(config.tlsKeyFile), minVersion: 'TLSv1.2' as const } }
+    : {}
   const app = Fastify({
+    ...(https as object),
     logger:
       opts.logger === false
         ? false
@@ -116,11 +136,15 @@ export async function buildApp(opts: { config: Config; db: Db; logger?: boolean 
     pinless: opts.pinless ?? new MockPinless(),
     services: opts.services ?? new MockEcoCashServices(),
     homeAffairs: opts.homeAffairs ?? new MockHomeAffairs(),
+    simSwap: opts.simSwap ?? (config.econetSimSwap ? new EconetSimSwap(config.econetSimSwap) : new MockSimSwap()),
+    numberVerify: opts.numberVerify ?? new MockNumberVerify(),
     log: app.log,
     notifier: createNotifier({ db, hub, log: app.log, pushEnabled: config.pushEnabled, push, sms: opts.sms ?? new MockSms(), email: opts.email ?? new MockEmail() }),
   })
   const model = opts.assistantModel !== undefined ? opts.assistantModel : config.anthropicApiKey ? anthropicModel(config.anthropicApiKey) : null
   ctx.assistant = createAssistant(ctx, model, { model: config.assistantModel, effort: config.assistantEffort })
+  ctx.llm = model
+  const surveillance = createSurveillanceSweeper(ctx)
   const configWatcher = createConfigWatcher(ctx)
   const intentSweeper = createIntentSweeper(ctx, config.maintenanceTickMs)
   const atmSweeper = createAtmSweeper(ctx)
@@ -145,10 +169,12 @@ export async function buildApp(opts: { config: Config; db: Db; logger?: boolean 
   await app.register(cors, {
     origin: config.corsOrigins === '*' ? true : config.corsOrigins,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['content-type', 'authorization'],
+    allowedHeaders: ['content-type', 'authorization', 'x-device-context'],
+    exposedHeaders: ['x-network-new', 'x-session-token'],
     maxAge: 600,
   })
   await app.register(websocket, { options: { maxPayload: 64 * 1024 } })
+  protect(app, { rateLimit: config.rateLimit, requireTls: config.requireTls, onLimited: (ip, url) => app.log.warn({ ip, url }, 'rate limited') })
 
   app.setErrorHandler((err: FastifyError & { code?: string }, req, reply) => {
     let body: ApiError
@@ -238,6 +264,9 @@ export async function buildApp(opts: { config: Config; db: Db; logger?: boolean 
   await supportAdminRoutes(app, ctx)
   await analyticsRoutes(app, ctx)
   await performanceRoutes(app, ctx)
+  await aiRiskRoutes(app, ctx)
+  await simSwapRoutes(app, ctx)
+  await securityRoutes(app, ctx)
 
   app.addHook('onClose', async () => {
     configWatcher.stop()
@@ -247,11 +276,12 @@ export async function buildApp(opts: { config: Config; db: Db; logger?: boolean 
     splitSweeper.stop()
     push.stop()
     loanSweeper.stop()
+    surveillance.stop()
     apiMetrics.stop()
     await apiMetrics.flush()
     hub.closeAll()
     await ctx.notifier.idle()
   })
 
-  return { app, ctx, configWatcher, intentSweeper, atmSweeper, stopOrderSweeper, splitSweeper, loanSweeper, push, apiMetrics }
+  return { app, ctx, configWatcher, intentSweeper, atmSweeper, stopOrderSweeper, splitSweeper, loanSweeper, surveillance, push, apiMetrics }
 }

@@ -1,5 +1,5 @@
 // Help & support: tickets, the "EcoCash Support" chat where people from support answer, and assistant analytics.
-import type { SupportStats, SupportTicket, SupportTicketDetail, SupportTopic, TicketStatus } from '../../../shared/api'
+import { SUPPORT_TEAM, type SupportStats, type SupportTicket, type SupportTicketDetail, type SupportTopic, type TicketChannel, type TicketPriority, type TicketStatus } from '../../../shared/api'
 import type { Ctx } from '../context'
 import type { Queryable } from '../db/index'
 import { notFound, validation } from '../errors'
@@ -26,6 +26,7 @@ export async function logAssistant(q: Queryable, userId: string, kind: string, d
 interface TicketRow {
   id: string; reference: string; user_id: string; topic: SupportTopic; summary: string; status: TicketStatus
   assigned_to: string | null; first_response_at: Date | null; created_at: Date; updated_at: Date
+  priority: TicketPriority; channel: TicketChannel
 }
 
 async function toTickets(q: Queryable, rows: TicketRow[]): Promise<SupportTicket[]> {
@@ -33,6 +34,7 @@ async function toTickets(q: Queryable, rows: TicketRow[]): Promise<SupportTicket
   return rows.map((r) => ({
     id: r.id, reference: r.reference, user: toPublicUser(users.get(r.user_id)!), topic: r.topic, summary: r.summary, status: r.status,
     createdAt: iso(r.created_at), updatedAt: iso(r.updated_at), firstResponseAt: isoOrNull(r.first_response_at), assignedTo: r.assigned_to,
+    priority: r.priority, channel: r.channel,
   }))
 }
 
@@ -42,13 +44,26 @@ async function supportChat(q: Queryable, out: Outbox, userId: string): Promise<{
   return { chatId, supportId: support.id }
 }
 
-/** The assistant hands over to a person: a ticket, and a first message in the EcoCash Support chat. */
-export async function openTicket(q: Queryable, out: Outbox, userId: string, topic: SupportTopic, summary: string): Promise<SupportTicket> {
-  const [row] = await q.query<TicketRow>('INSERT INTO support_tickets (id, user_id, topic, summary) VALUES ($1, $2, $3, $4) RETURNING *', [newId(), userId, topic, summary])
+/**
+ * The receptionist hands over to a person: a ticket (urgent ones first in the portal, routed to the topic's team), and
+ * a first message in the EcoCash Support chat.
+ */
+export async function openTicket(
+  q: Queryable, out: Outbox, userId: string, topic: SupportTopic, summary: string,
+  opts: { priority?: TicketPriority; channel?: TicketChannel } = {},
+): Promise<SupportTicket> {
+  const priority = opts.priority ?? (topic === 'fraud' ? 'urgent' : 'normal')
+  const [row] = await q.query<TicketRow>(
+    'INSERT INTO support_tickets (id, user_id, topic, summary, priority, channel) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *',
+    [newId(), userId, topic, summary, priority, opts.channel ?? 'chat'],
+  )
   const { chatId, supportId } = await supportChat(q, out, userId)
+  const team = SUPPORT_TEAM[topic]
   await postMessage(q, out, {
     chatId, senderId: supportId, kind: 'text',
-    text: `Hi, this is EcoCash Support. We have your request ${row.reference}: "${summary}". A person from our team will answer you here. You can add anything else below.`,
+    text: priority === 'urgent'
+      ? `Hi, this is EcoCash Support. We have your urgent request ${row.reference}: "${summary}". Our ${team} team sees it first and will answer you here as soon as possible. You can add anything else below.`
+      : `Hi, this is EcoCash Support. We have your request ${row.reference}: "${summary}". Someone from our ${team} team will answer you here. You can add anything else below.`,
   })
   await logAssistant(q, userId, 'handover', topic)
   return (await toTickets(q, [row]))[0]
@@ -65,7 +80,7 @@ export async function customerWrote(q: Queryable, out: Outbox, user: UserRow, te
 export async function listTickets(q: Queryable, status: TicketStatus | null, page: number, pageSize: number) {
   const [{ total }] = await q.query<{ total: number }>('SELECT count(*)::int AS total FROM support_tickets WHERE ($1::text IS NULL OR status = $1)', [status])
   const rows = await q.query<TicketRow>(
-    `SELECT * FROM support_tickets WHERE ($1::text IS NULL OR status = $1) ORDER BY (status = 'open') DESC, updated_at DESC LIMIT $2 OFFSET $3`,
+    `SELECT * FROM support_tickets WHERE ($1::text IS NULL OR status = $1) ORDER BY (status = 'open') DESC, (priority = 'urgent' AND status <> 'closed') DESC, updated_at DESC LIMIT $2 OFFSET $3`,
     [status, pageSize, (page - 1) * pageSize],
   )
   return { items: await toTickets(q, rows), total, page, pageSize }

@@ -26,6 +26,7 @@ import { checkServiceImage } from './branding'
 import { feesAccount } from './tariff'
 import { toTransactions } from './transactions'
 import type { UserRow } from './users'
+import { openJson, sealJson } from '../lib/vault'
 
 interface ServiceRow {
   id: string
@@ -270,7 +271,8 @@ export async function submit(ctx: Ctx, me: UserRow, id: string, body: { values: 
       const reqId = newId()
       await q.query(
         `INSERT INTO service_requests (id, reference, user_id, service_id, service_name, lines, files) VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-        [reqId, reference, me.id, def.id, JSON.stringify(def.name), JSON.stringify(shown), JSON.stringify(files)],
+        // What the customer entered (ID numbers, addresses) is sealed at rest (DATA_KEYS).
+        [reqId, reference, me.id, def.id, JSON.stringify(def.name), JSON.stringify(sealJson(shown)), JSON.stringify(files)],
       )
       const request = await loadRequest(q, reqId)
       const result: ServiceResult = { reference, request, lines: shown }
@@ -330,7 +332,7 @@ export interface RequestRow {
 
 export function toRequest(r: RequestRow): ServiceRequest {
   const s: ServiceRequest = {
-    id: r.id, reference: r.reference, serviceId: r.service_id ?? '', serviceName: r.service_name, status: r.status, lines: r.lines,
+    id: r.id, reference: r.reference, serviceId: r.service_id ?? '', serviceName: r.service_name, status: r.status, lines: openJson<RequestRow['lines']>(r.lines),
     createdAt: iso(r.created_at), updatedAt: iso(r.updated_at),
   }
   if (r.note) s.note = r.note

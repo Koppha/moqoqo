@@ -108,7 +108,7 @@ export async function analyticsRoutes(app: FastifyInstance, ctx: Ctx) {
   app.put('/admin/v1/risk/rules', auth, async (req) => {
     const body = parse(
       z.array(z.object({
-        key: z.enum(['velocity', 'new_device_cashout', 'many_senders', 'unusual_amount', 'night_cashout']),
+        key: z.enum(['velocity', 'new_device_cashout', 'many_senders', 'unusual_amount', 'night_cashout', 'sim_swap']),
         enabled: z.boolean(),
         action: z.enum(['flag', 'block']),
         params: z.record(z.string(), z.number().min(0).max(1_000_000)),

@@ -21,7 +21,11 @@ import { AuthProvider, useAppMode, useAuth } from '../state/Auth'
 import { DialogProvider } from '../state/Dialogs'
 import { Sync } from '../state/Sync'
 import { FloatingApps } from '../components/FloatingApps'
+import { IdleSignOut } from '../components/IdleSignOut'
+import { NetworkGuard } from '../components/NetworkGuard'
+import { SimWatch } from '../components/SimWatch'
 import { colors, displayHandoff, isDark } from '../theme'
+import { InsecureReleaseGate, PrivacyCover } from '../components/PrivacyCover'
 
 // Keep the native splash up until the app's own splash (or, in the EcoSure app, the first screen) is ready.
 void SplashScreen.preventAutoHideAsync().catch(() => {})
@@ -71,7 +75,6 @@ function Navigator({ signedIn, onboarded, mode }: { signedIn: boolean; onboarded
         <Stack.Protected guard={signedIn && mode === 'customer'}>
           <Stack.Screen name="(tabs)" />
           <Stack.Screen name="lec" />
-          <Stack.Screen name="pay" />
           <Stack.Screen name="money" />
           <Stack.Screen name="receive-money" />
           <Stack.Screen name="split/index" />
@@ -79,7 +82,6 @@ function Navigator({ signedIn, onboarded, mode }: { signedIn: boolean; onboarded
           <Stack.Screen name="split/new" />
           <Stack.Screen name="split/history" />
           <Stack.Screen name="topup" />
-          <Stack.Screen name="bank" />
           <Stack.Screen name="remit" />
           <Stack.Screen name="donate/index" />
           <Stack.Screen name="donate/new" />
@@ -87,8 +89,6 @@ function Navigator({ signedIn, onboarded, mode }: { signedIn: boolean; onboarded
           <Stack.Screen name="business" />
           <Stack.Screen name="send" />
           <Stack.Screen name="send-many" />
-          <Stack.Screen name="cashout" />
-          <Stack.Screen name="service/[id]" />
           <Stack.Screen name="bills/index" />
           <Stack.Screen name="bills/[category]" />
         </Stack.Protected>
@@ -99,8 +99,17 @@ function Navigator({ signedIn, onboarded, mode }: { signedIn: boolean; onboarded
           <Stack.Screen name="society/apply" />
           <Stack.Screen name="society/loans" />
         </Stack.Protected>
+        {/* Airtime and bundles (portal services), paying a merchant or agent, cash out and the bank: customers, and
+            merchants and agents from their takings or float. */}
+        <Stack.Protected guard={signedIn && (mode === 'customer' || mode === 'business')}>
+          <Stack.Screen name="pay" />
+          <Stack.Screen name="bank" />
+          <Stack.Screen name="cashout" />
+          <Stack.Screen name="service/[id]" />
+        </Stack.Protected>
         <Stack.Protected guard={signedIn && mode === 'business'}>
           <Stack.Screen name="biz" />
+          <Stack.Screen name="biz-profile" />
           <Stack.Screen name="biz-action/[kind]" />
           <Stack.Screen name="receive" />
           <Stack.Screen name="my-qr" />
@@ -121,7 +130,10 @@ function Navigator({ signedIn, onboarded, mode }: { signedIn: boolean; onboarded
         <Stack.Protected guard={!signedIn}>
           <Stack.Screen name="login" options={{ animation: APP === 'ecosure' ? 'slide_from_right' : 'fade' }} />
           <Stack.Screen name="setup" />
+          <Stack.Screen name="lost-phone" />
         </Stack.Protected>
+        {/* Legal and safety: from Me, and from the terms at phone setup (signed out). */}
+        <Stack.Screen name="legal" />
         {/* EcoSure: a mini app in EcoCash Super App, and the whole of the standalone EcoSure app (signed in, it opens on it: the
             first screen that app may show). Guests of the EcoSure app may get quotes; ecosure/_layout keeps the rest
             for signed-in customers. Declared once only: a screen named twice is governed by its first guard. */}
@@ -168,10 +180,16 @@ export default function RootLayout() {
         <AuthProvider>
           <AppStateProvider>
             <DialogProvider>
-              <RootNavigator />
+              <IdleSignOut>
+                <RootNavigator />
+              </IdleSignOut>
               <Toast />
               <MaintenanceGate />
               <DeviceGate />
+              <NetworkGuard />
+              <SimWatch />
+              <PrivacyCover />
+              <InsecureReleaseGate />
             </DialogProvider>
           </AppStateProvider>
         </AuthProvider>

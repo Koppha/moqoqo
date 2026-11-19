@@ -4,6 +4,7 @@ import { router, useLocalSearchParams } from 'expo-router'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { ActivityIndicator, StyleSheet, Text, TextInput, View } from 'react-native'
 import NfcManager, { NfcTech } from 'react-native-nfc-manager'
+import { ECOCASH_AID, TAP_PREFIX } from '../../modules/ecocash-hce'
 import { NO_PIN_TAP_LIMIT, PAYCODE_DIGITS, type PaymentIntent } from '../../shared/api'
 import { QrCode } from '../components/QrCode'
 import { Button, Card, Header, Icon, Screen } from '../components/ui'
@@ -25,6 +26,20 @@ type Nfc = 'checking' | 'ready' | 'off' | 'none'
 
 /** Customers' payment codes: 18 digits starting 62, as a Code 128 barcode or a QR code. */
 const PAYCODE = new RegExp(`^62\\d{${PAYCODE_DIGITS - 2}}$`)
+
+/**
+ * A customer's phone held to this device (EcoCash Tap to pay): select our application ID; while its Tap screen is
+ * open it answers "EC1:" + its one-time payment code + 9000 (else 6985). The code is then charged like a scanned one.
+ */
+async function readTapCode(): Promise<string | null> {
+  const aid = (ECOCASH_AID.match(/../g) ?? []).map((h) => parseInt(h, 16))
+  const res = await NfcManager.isoDepHandler.transceive([0x00, 0xa4, 0x04, 0x00, aid.length, ...aid, 0x00])
+  if (res.length < 2 || res[res.length - 2] !== 0x90 || res[res.length - 1] !== 0x00) return null
+  const text = String.fromCharCode(...res.slice(0, -2))
+  if (!text.startsWith(TAP_PREFIX)) return null
+  const code = text.slice(TAP_PREFIX.length)
+  return PAYCODE.test(code) ? code : null
+}
 
 /**
  * Merchant "Receive money": one sale amount → a payment request the customer pays by scanning the QR,
@@ -169,9 +184,18 @@ export default function Receive() {
     ;(async () => {
       while (alive) {
         try {
-          await NfcManager.requestTechnology(NfcTech.NfcA)
+          // A customer's phone (EcoCash Tap to pay) answers as IsoDep; a card or sticker as plain NfcA.
+          await NfcManager.requestTechnology([NfcTech.IsoDep, NfcTech.NfcA])
           const tag = await NfcManager.getTag()
-          if (alive && tag?.id) await charge(tag.id.toUpperCase())
+          if (!alive || !tag) break
+          if (tag.techTypes?.some((x) => x.endsWith('IsoDep'))) {
+            const code = await readTapCode()
+            if (!alive) break
+            if (code) await chargeCode(code)
+            else toast(t.receive.tapOpenApp)
+            break
+          }
+          if (tag.id) await charge(tag.id.toUpperCase())
           break
         } catch {
           // Cancelled or a bad read: try again while the request is open.
@@ -184,7 +208,7 @@ export default function Receive() {
       alive = false
       NfcManager.cancelTechnologyRequest().catch(() => {})
     }
-  }, [nfc, open, intent?.id, charge, intent])
+  }, [nfc, open, intent?.id, charge, chargeCode, toast, t, intent])
 
   const cancel = async () => {
     if (intent && open) {

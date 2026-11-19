@@ -27,7 +27,7 @@ export function Sync() {
   useEffect(() => {
     langRef.current = lang
   }, [lang])
-  const { session, updateUser } = useAuth()
+  const { session, updateUser, status } = useAuth()
   const token = session?.token ?? null
   const rt = useRef<Realtime | null>(null)
   const openChat = useRef<string | null>(null)
@@ -89,6 +89,19 @@ export function Sync() {
       // Offline: the realtime reconnect calls loadAll again.
     }
   }, [dispatch, updateUser])
+
+  // Locked (after time in the background, or Lock now): personal data leaves memory until the PIN or fingerprint
+  // opens the app again (DFS guidelines 3.2.6b–c); then it is loaded afresh.
+  const wasLocked = useRef(false)
+  useEffect(() => {
+    if (status === 'locked') {
+      wasLocked.current = true
+      dispatch({ type: 'reset' })
+    } else if (status === 'unlocked' && wasLocked.current) {
+      wasLocked.current = false
+      void loadAll()
+    }
+  }, [status, dispatch, loadAll])
 
   useEffect(() => {
     // A new account (sign-in, or a business opened from EcoCash Super App and back): nothing of the last one stays.

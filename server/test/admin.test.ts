@@ -50,13 +50,13 @@ describe('admin users', () => {
   })
 
   it('creates users with generated codes; they can log in', async () => {
-    const agent = await t.call('POST', '/admin/v1/users', { msisdn: '62777002', name: 'Roma Agent', role: 'agent', pin: '5555' }, admin)
+    const agent = await t.call('POST', '/admin/v1/users', { msisdn: '62777002', name: 'Roma Agent', role: 'agent', pin: '5815' }, admin)
     expect(agent.status).toBe(201)
     expect(agent.body).toMatchObject({ msisdn: '+26662777002', role: 'agent', code: 'AGENT-0102', balance: 0, status: 'active' })
-    const merchant = await t.call('POST', '/admin/v1/users', { msisdn: '+26662888002', name: 'Thato', role: 'merchant', pin: '5555', businessName: 'Roma Spaza' }, admin)
+    const merchant = await t.call('POST', '/admin/v1/users', { msisdn: '+26662888002', name: 'Thato', role: 'merchant', pin: '5815', businessName: 'Roma Spaza' }, admin)
     expect(merchant.body).toMatchObject({ code: '1043', businessName: 'Roma Spaza' })
-    expect((await t.call('POST', '/admin/v1/users', { msisdn: '+26662888002', name: 'Dup', role: 'customer', pin: '5555' }, admin)).body.error.code).toBe('CONFLICT')
-    expect((await t.login('+26662777002', 'business', '5555')).user.code).toBe('AGENT-0102')
+    expect((await t.call('POST', '/admin/v1/users', { msisdn: '+26662888002', name: 'Dup', role: 'customer', pin: '5815' }, admin)).body.error.code).toBe('CONFLICT')
+    expect((await t.login('+26662777002', 'business', '5815')).user.code).toBe('AGENT-0102')
 
     // Float top-up for the new agent.
     const f = await t.call('POST', `/admin/v1/users/${agent.body.id}/float`, { amount: 5000, note: 'FNB deposit 8812' }, admin)

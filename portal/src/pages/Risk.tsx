@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { RISK_RULE_INFO, type RiskAlert, type RiskAlertStatus, type RiskRule } from '../../../shared/api'
+import { Link } from 'react-router'
+import { RISK_ALERT_TITLE, RISK_RULE_INFO, type RiskAlert, type RiskAlertStatus, type RiskRule } from '../../../shared/api'
 import { api, errorMessage } from '../api'
 import { useAuth } from '../auth'
 import { CountTabs, CsvButton, Dot, DotChip, fetchAll, FilterBar, FilterChip, TableCard, Tag, ViewSwitch, When, type Tone } from '../components/dataview'
@@ -27,7 +28,7 @@ export function RiskPage() {
       <PageHeader
         crumbs={['Security', 'Fraud and anomalies', tab === 'alerts' ? 'Alerts' : 'Rules']}
         title={tab === 'alerts' ? 'Risk alerts' : 'Risk rules'}
-        subtitle="Fraud and anomaly rules run on every payment. Blocked payments never happen; flagged ones go through and wait for review here."
+        subtitle="Fixed rules and the behavioural score run on every payment; transaction surveillance runs every 15 minutes. Blocked payments never happen; flagged ones go through and wait for review here or in their case."
         views={<ViewSwitch label="View" value={tab} onChange={setTab} options={[{ value: 'alerts', label: 'Alerts' }, { value: 'rules', label: 'Rules' }]} />}
       />
       {tab === 'alerts' ? <Alerts /> : <Rules />}
@@ -95,10 +96,10 @@ function Alerts() {
           <CsvButton
             filename="moqoqo-risk-alerts.csv"
             rows={async () => [
-              ['Raised (UTC)', 'Severity', 'Rule', 'Wallet', 'Number', 'What happened', 'Amount (M)', 'Kind', 'Action', 'Review', 'Reviewed by'],
+              ['Raised (UTC)', 'Severity', 'Rule', 'Wallet', 'Number', 'What happened', 'Amount (M)', 'Kind', 'Action', 'Review', 'Reviewed by', 'Score', 'Case'],
               ...(await fetchAll((p) => api.risk.alerts({ status, severity, action, page: p, pageSize: 100 }))).map((a) => [
-                a.createdAt, a.severity, RISK_RULE_INFO[a.rule].title, a.user.name, a.user.msisdn, a.detail, a.amount?.toFixed(2), a.kind,
-                a.action, a.status, a.reviewedBy,
+                a.createdAt, a.severity, RISK_ALERT_TITLE[a.rule], a.user.name, a.user.msisdn, a.detail, a.amount?.toFixed(2), a.kind,
+                a.action, a.status, a.reviewedBy, a.score, a.caseRef,
               ]),
             ]}
           />
@@ -134,7 +135,7 @@ function Alerts() {
                       <tr key={a.id}>
                         <td><When iso={a.createdAt} /></td>
                         <td><Dot tone={SEV_TONE[a.severity]}>{SEVERITY.find((x) => x.value === a.severity)?.label}</Dot></td>
-                        <td><strong>{RISK_RULE_INFO[a.rule].title}</strong></td>
+                        <td><strong>{RISK_ALERT_TITLE[a.rule]}</strong>{a.score !== null && <div className="muted small">Score {a.score}</div>}{a.caseId && <div className="small"><Link to={`/cases/${a.caseId}`}>{a.caseRef}</Link></div>}</td>
                         <td><div>{a.user.name}</div><div className="muted small nowrap">{formatMsisdn(a.user.msisdn)}</div></td>
                         <td className="cell-message">{a.detail}{a.amount !== null ? <div className="muted small">{formatMoney(a.amount)} · {a.kind}</div> : null}</td>
                         <td>{a.action === 'blocked' ? <Tag tone="red">Blocked</Tag> : <Tag tone="amber">Let through</Tag>}</td>
@@ -214,7 +215,7 @@ function Rules() {
       </div>
       <WriteButton variant="primary" disabled={!v} onClick={save}>Save rules</WriteButton>
       <p className="muted small" style={{ marginTop: 12 }}>
-        Free today: these rules. Later the same alerts can come from an open-source engine (Marble, Jube) or an enterprise one (Featurespace, Feedzai).
+        These fixed rules run alongside the behavioural fraud score and transaction surveillance, set in AI governance. An enterprise engine (Featurespace, Feedzai) can feed the same alerts and cases later.
       </p>
     </>
   )

@@ -6,6 +6,7 @@ import { notFound, validation } from '../errors'
 import { newId } from '../lib/crypto'
 import { iso } from '../lib/time'
 import { setSetting } from './maintenance'
+import { openBytes, sealBytes } from '../lib/vault'
 
 const MAX_BYTES = 2 * 1024 * 1024
 
@@ -50,7 +51,7 @@ export async function uploadAsset(q: Queryable, adminEmail: string, body: AssetU
   const [r] = await q.query<AssetRow>(
     `INSERT INTO assets (id, kind, content_type, width, height, size_bytes, content, uploaded_by) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
      RETURNING id, kind, content_type, width, height, size_bytes, created_at`,
-    [newId(), body.kind, body.contentType, size.width, size.height, content.length, content, adminEmail],
+    [newId(), body.kind, body.contentType, size.width, size.height, content.length, sealBytes(content), adminEmail],
   )
   return toAsset(r)
 }
@@ -68,7 +69,7 @@ export async function setProfilePhoto(q: Queryable, userId: string, body: { cont
 
 export async function readAsset(q: Queryable, id: string): Promise<{ contentType: string; content: Buffer } | null> {
   const [r] = await q.query<{ content_type: string; content: Uint8Array }>('SELECT content_type, content FROM assets WHERE id = $1', [id])
-  return r ? { contentType: r.content_type, content: Buffer.from(r.content) } : null
+  return r ? { contentType: r.content_type, content: openBytes(r.content) } : null
 }
 
 async function asset(q: Queryable, id: string | null | undefined, kind?: AssetKind): Promise<Asset | null> {

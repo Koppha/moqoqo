@@ -5,6 +5,7 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
+import android.provider.Settings
 import android.telephony.SubscriptionManager
 import android.telephony.TelephonyManager
 import expo.modules.kotlin.modules.Module
@@ -22,6 +23,24 @@ class SimInfoModule : Module() {
       val ctx = appContext.reactContext ?: return@AsyncFunction emptyList<Map<String, Any?>>()
       readSims(ctx)
     }
+
+    // Airplane mode: no SIM has service then, and that is not a sign of a SIM swap.
+    Function("airplaneMode") {
+      val ctx = appContext.reactContext ?: return@Function false
+      Settings.Global.getInt(ctx.contentResolver, Settings.Global.AIRPLANE_MODE_ON, 0) != 0
+    }
+  }
+
+  /**
+   * Whether this SIM is registered on a mobile network right now. The registered network's code is only known while
+   * registered, so an empty one means no service (a SIM whose number moved to another SIM card loses service).
+   * Needs no extra permission.
+   */
+  private fun inService(tm: TelephonyManager, subId: Int?): Boolean? = try {
+    val t = if (subId != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) tm.createForSubscriptionId(subId) else tm
+    !t.networkOperator.isNullOrEmpty()
+  } catch (e: Exception) {
+    null
   }
 
   private fun granted(ctx: Context, permission: String) =
@@ -40,6 +59,8 @@ class SimInfoModule : Module() {
         "mnc" to op.drop(3).ifEmpty { null },
         "carrier" to tm.simOperatorName,
         "number" to null,
+        "subId" to null,
+        "inService" to inService(tm, null),
       ))
     }
     val sm = ctx.getSystemService(Context.TELEPHONY_SUBSCRIPTION_SERVICE) as SubscriptionManager
@@ -59,6 +80,9 @@ class SimInfoModule : Module() {
         "mnc" to mnc,
         "carrier" to info.carrierName?.toString(),
         "number" to number?.ifEmpty { null },
+        // A new SIM card gets a new subscription id, even for the same number: how the app tells the card changed.
+        "subId" to info.subscriptionId,
+        "inService" to inService(tm, info.subscriptionId),
       )
     }
   }

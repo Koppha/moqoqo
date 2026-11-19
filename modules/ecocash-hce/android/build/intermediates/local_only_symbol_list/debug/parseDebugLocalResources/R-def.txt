@@ -1,0 +1,4 @@
+R_DEF: Internal format may change without notice
+local
+string ecocash_hce_description
+xml ecocash_apdu_service

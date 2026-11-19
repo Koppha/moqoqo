@@ -1,16 +1,24 @@
 -- Merging decision tree log ---
 manifest
-ADDED from C:\Users\hatasik\StudioProjects\moqoqo-native\modules\device-integrity\android\build\intermediates\tmp\ProcessLibraryManifest\debug\tempAndroidManifest9923855682089757551.xml:2:13-83
-INJECTED from C:\Users\hatasik\StudioProjects\moqoqo-native\modules\device-integrity\android\build\intermediates\tmp\ProcessLibraryManifest\debug\tempAndroidManifest9923855682089757551.xml:2:13-83
+ADDED from C:\Users\hatasik\StudioProjects\moqoqo-native\modules\device-integrity\android\src\main\AndroidManifest.xml:1:1-5:12
+INJECTED from C:\Users\hatasik\StudioProjects\moqoqo-native\modules\device-integrity\android\src\main\AndroidManifest.xml:1:1-5:12
 	package
-		INJECTED from C:\Users\hatasik\StudioProjects\moqoqo-native\modules\device-integrity\android\build\intermediates\tmp\ProcessLibraryManifest\debug\tempAndroidManifest9923855682089757551.xml
+		INJECTED from C:\Users\hatasik\StudioProjects\moqoqo-native\modules\device-integrity\android\src\main\AndroidManifest.xml
 	xmlns:android
-		ADDED from C:\Users\hatasik\StudioProjects\moqoqo-native\modules\device-integrity\android\build\intermediates\tmp\ProcessLibraryManifest\debug\tempAndroidManifest9923855682089757551.xml:2:23-81
+		ADDED from C:\Users\hatasik\StudioProjects\moqoqo-native\modules\device-integrity\android\src\main\AndroidManifest.xml:1:11-69
+uses-permission#android.permission.ACCESS_WIFI_STATE
+ADDED from C:\Users\hatasik\StudioProjects\moqoqo-native\modules\device-integrity\android\src\main\AndroidManifest.xml:3:3-74
+	android:name
+		ADDED from C:\Users\hatasik\StudioProjects\moqoqo-native\modules\device-integrity\android\src\main\AndroidManifest.xml:3:20-71
+uses-permission#android.permission.ACCESS_NETWORK_STATE
+ADDED from C:\Users\hatasik\StudioProjects\moqoqo-native\modules\device-integrity\android\src\main\AndroidManifest.xml:4:3-77
+	android:name
+		ADDED from C:\Users\hatasik\StudioProjects\moqoqo-native\modules\device-integrity\android\src\main\AndroidManifest.xml:4:20-74
 uses-sdk
-INJECTED from C:\Users\hatasik\StudioProjects\moqoqo-native\modules\device-integrity\android\build\intermediates\tmp\ProcessLibraryManifest\debug\tempAndroidManifest9923855682089757551.xml reason: use-sdk injection requested
-INJECTED from C:\Users\hatasik\StudioProjects\moqoqo-native\modules\device-integrity\android\build\intermediates\tmp\ProcessLibraryManifest\debug\tempAndroidManifest9923855682089757551.xml
-INJECTED from C:\Users\hatasik\StudioProjects\moqoqo-native\modules\device-integrity\android\build\intermediates\tmp\ProcessLibraryManifest\debug\tempAndroidManifest9923855682089757551.xml
+INJECTED from C:\Users\hatasik\StudioProjects\moqoqo-native\modules\device-integrity\android\src\main\AndroidManifest.xml reason: use-sdk injection requested
+INJECTED from C:\Users\hatasik\StudioProjects\moqoqo-native\modules\device-integrity\android\src\main\AndroidManifest.xml
+INJECTED from C:\Users\hatasik\StudioProjects\moqoqo-native\modules\device-integrity\android\src\main\AndroidManifest.xml
 	android:targetSdkVersion
-		INJECTED from C:\Users\hatasik\StudioProjects\moqoqo-native\modules\device-integrity\android\build\intermediates\tmp\ProcessLibraryManifest\debug\tempAndroidManifest9923855682089757551.xml
+		INJECTED from C:\Users\hatasik\StudioProjects\moqoqo-native\modules\device-integrity\android\src\main\AndroidManifest.xml
 	android:minSdkVersion
-		INJECTED from C:\Users\hatasik\StudioProjects\moqoqo-native\modules\device-integrity\android\build\intermediates\tmp\ProcessLibraryManifest\debug\tempAndroidManifest9923855682089757551.xml
+		INJECTED from C:\Users\hatasik\StudioProjects\moqoqo-native\modules\device-integrity\android\src\main\AndroidManifest.xml

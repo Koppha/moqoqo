@@ -1,0 +1,48 @@
+-- Merging decision tree log ---
+manifest
+ADDED from C:\Users\hatasik\StudioProjects\moqoqo-native\modules\ecocash-hce\android\src\main\AndroidManifest.xml:1:1-16:12
+INJECTED from C:\Users\hatasik\StudioProjects\moqoqo-native\modules\ecocash-hce\android\src\main\AndroidManifest.xml:1:1-16:12
+	package
+		INJECTED from C:\Users\hatasik\StudioProjects\moqoqo-native\modules\ecocash-hce\android\src\main\AndroidManifest.xml
+	xmlns:android
+		ADDED from C:\Users\hatasik\StudioProjects\moqoqo-native\modules\ecocash-hce\android\src\main\AndroidManifest.xml:1:11-69
+uses-permission#android.permission.NFC
+ADDED from C:\Users\hatasik\StudioProjects\moqoqo-native\modules\ecocash-hce\android\src\main\AndroidManifest.xml:3:3-60
+	android:name
+		ADDED from C:\Users\hatasik\StudioProjects\moqoqo-native\modules\ecocash-hce\android\src\main\AndroidManifest.xml:3:20-57
+uses-feature#android.hardware.nfc.hce
+ADDED from C:\Users\hatasik\StudioProjects\moqoqo-native\modules\ecocash-hce\android\src\main\AndroidManifest.xml:4:3-84
+	android:required
+		ADDED from C:\Users\hatasik\StudioProjects\moqoqo-native\modules\ecocash-hce\android\src\main\AndroidManifest.xml:4:57-81
+	android:name
+		ADDED from C:\Users\hatasik\StudioProjects\moqoqo-native\modules\ecocash-hce\android\src\main\AndroidManifest.xml:4:17-56
+application
+ADDED from C:\Users\hatasik\StudioProjects\moqoqo-native\modules\ecocash-hce\android\src\main\AndroidManifest.xml:5:3-15:17
+service#com.moqoqo.hce.EcoCashHceService
+ADDED from C:\Users\hatasik\StudioProjects\moqoqo-native\modules\ecocash-hce\android\src\main\AndroidManifest.xml:6:5-14:15
+	android:exported
+		ADDED from C:\Users\hatasik\StudioProjects\moqoqo-native\modules\ecocash-hce\android\src\main\AndroidManifest.xml:8:7-30
+	android:permission
+		ADDED from C:\Users\hatasik\StudioProjects\moqoqo-native\modules\ecocash-hce\android\src\main\AndroidManifest.xml:9:7-63
+	android:name
+		ADDED from C:\Users\hatasik\StudioProjects\moqoqo-native\modules\ecocash-hce\android\src\main\AndroidManifest.xml:7:7-54
+intent-filter#action:name:android.nfc.cardemulation.action.HOST_APDU_SERVICE
+ADDED from C:\Users\hatasik\StudioProjects\moqoqo-native\modules\ecocash-hce\android\src\main\AndroidManifest.xml:10:7-12:23
+action#android.nfc.cardemulation.action.HOST_APDU_SERVICE
+ADDED from C:\Users\hatasik\StudioProjects\moqoqo-native\modules\ecocash-hce\android\src\main\AndroidManifest.xml:11:9-85
+	android:name
+		ADDED from C:\Users\hatasik\StudioProjects\moqoqo-native\modules\ecocash-hce\android\src\main\AndroidManifest.xml:11:17-82
+meta-data#android.nfc.cardemulation.host_apdu_service
+ADDED from C:\Users\hatasik\StudioProjects\moqoqo-native\modules\ecocash-hce\android\src\main\AndroidManifest.xml:13:7-124
+	android:resource
+		ADDED from C:\Users\hatasik\StudioProjects\moqoqo-native\modules\ecocash-hce\android\src\main\AndroidManifest.xml:13:77-121
+	android:name
+		ADDED from C:\Users\hatasik\StudioProjects\moqoqo-native\modules\ecocash-hce\android\src\main\AndroidManifest.xml:13:18-76
+uses-sdk
+INJECTED from C:\Users\hatasik\StudioProjects\moqoqo-native\modules\ecocash-hce\android\src\main\AndroidManifest.xml reason: use-sdk injection requested
+INJECTED from C:\Users\hatasik\StudioProjects\moqoqo-native\modules\ecocash-hce\android\src\main\AndroidManifest.xml
+INJECTED from C:\Users\hatasik\StudioProjects\moqoqo-native\modules\ecocash-hce\android\src\main\AndroidManifest.xml
+	android:targetSdkVersion
+		INJECTED from C:\Users\hatasik\StudioProjects\moqoqo-native\modules\ecocash-hce\android\src\main\AndroidManifest.xml
+	android:minSdkVersion
+		INJECTED from C:\Users\hatasik\StudioProjects\moqoqo-native\modules\ecocash-hce\android\src\main\AndroidManifest.xml

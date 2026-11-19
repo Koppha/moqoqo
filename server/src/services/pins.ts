@@ -1,8 +1,12 @@
+import { PAY_BIOMETRIC_PREFIX } from '../../../shared/api'
 import type { Queryable } from '../db/index'
 import { AppError, validation } from '../errors'
 import { hashSecret, verifySecret } from '../lib/crypto'
+import { logAuthEvent, payBiometricValid } from './authLog'
+import { deviceSecurity } from './maintenance'
 import type { UserRow } from './users'
 
+/** Defaults; the live values are App settings › Security (maxPinAttempts, pinLockMinutes). */
 export const MAX_PIN_ATTEMPTS = 5
 export const PIN_LOCK_MINUTES = 15
 
@@ -31,12 +35,15 @@ export function checkStrongPin(pin: string) {
 }
 
 /**
- * Verifies a PIN with lockout: 5 wrong PINs in a row lock that PIN for 15 minutes; a correct PIN resets the counter.
- * Must run OUTSIDE money transactions so a failed attempt is never rolled back.
+ * Verifies a PIN with lockout: the portal's maxPinAttempts wrong PINs in a row lock that PIN for pinLockMinutes; a
+ * correct PIN resets the counter. For the wallet PIN, a payment-biometric token (fingerprint on this phone) counts as
+ * the PIN; a bad token counts as a wrong PIN. Must run OUTSIDE money transactions so a failed attempt is never rolled back.
  */
 export async function checkPin(db: Queryable, user: UserRow, pin: unknown, kind: PinKind = 'wallet'): Promise<void> {
-  const value = parsePin(pin)
+  const token = kind === 'wallet' && typeof pin === 'string' && pin.startsWith(PAY_BIOMETRIC_PREFIX) && pin.length <= 64 ? pin : null
+  const value = token ?? parsePin(pin)
   const c = COLUMNS[kind]
+  const policy = await deviceSecurity(db)
   const [state] = await db.query<{ failed: number; locked_until: Date | null; locked: boolean; hash: string | null; salt: string | null }>(
     `SELECT ${c.failed} AS failed, ${c.locked} AS locked_until, (${c.locked} IS NOT NULL AND ${c.locked} > now()) AS locked,
        ${c.hash} AS hash, ${c.salt} AS salt FROM users WHERE id = $1`,
@@ -48,7 +55,7 @@ export async function checkPin(db: Queryable, user: UserRow, pin: unknown, kind:
     throw new AppError('WRONG_PIN', 'This account cannot use a PIN')
   }
 
-  if (await verifySecret(value, state.hash, state.salt)) {
+  if (token ? await payBiometricValid(db, user.id, token) : await verifySecret(value, state.hash, state.salt)) {
     if (state.failed > 0 || state.locked_until) {
       await db.query(`UPDATE users SET ${c.failed} = 0, ${c.locked} = NULL WHERE id = $1`, [user.id])
     }
@@ -59,19 +66,18 @@ export async function checkPin(db: Queryable, user: UserRow, pin: unknown, kind:
        ${c.failed} = CASE WHEN ${c.failed} + 1 >= $2 THEN 0 ELSE ${c.failed} + 1 END,
        ${c.locked} = CASE WHEN ${c.failed} + 1 >= $2 THEN now() + make_interval(mins => $3) ELSE NULL END
      WHERE id = $1 RETURNING ${c.failed} AS failed, ${c.locked} AS locked_until`,
-    [user.id, MAX_PIN_ATTEMPTS, PIN_LOCK_MINUTES],
+    [user.id, policy.maxPinAttempts, policy.pinLockMinutes],
   )
+  await logAuthEvent(db, { userId: user.id, kind: after?.locked_until ? 'pin_locked' : 'pin_wrong', detail: `${kind} PIN${token ? ' (fingerprint token)' : ''}` })
   if (after?.locked_until) throw lockedError(after.locked_until, user.id)
-  const left = MAX_PIN_ATTEMPTS - (after?.failed ?? 0)
+  const left = policy.maxPinAttempts - (after?.failed ?? 0)
   throw new AppError('WRONG_PIN', `Wrong PIN. ${left} ${left === 1 ? 'try' : 'tries'} left`)
 }
 
 /** Sets (or resets) the EcoSure PIN, clearing its lockout. */
 export async function setEcoSurePin(db: Queryable, userId: string, pin: unknown): Promise<void> {
   const value = parsePin(pin)
-  if (/^(\d)\1{3}$/.test(value) || ['1234', '4321', '0123', '9876'].includes(value)) {
-    throw validation('Choose a PIN that is harder to guess (not 1111 or 1234)')
-  }
+  checkStrongPin(value)
   const { hash, salt } = await hashSecret(value)
   await db.query('UPDATE users SET ecosure_pin_hash = $2, ecosure_pin_salt = $3, ecosure_failed_pins = 0, ecosure_locked_until = NULL WHERE id = $1', [userId, hash, salt])
 }

@@ -15,6 +15,8 @@ import { serviceIcon, useLocalized, useServices } from '../lib/services'
 import { useAppMode, useAuth } from '../state/Auth'
 import { useAppState } from '../state/AppState'
 import { useMoqoqo } from '../state/useMoqoqo'
+import { useDialogs } from '../state/Dialogs'
+import { canUsePayBiometric, disablePayBiometric, enablePayBiometric, usePayBiometric } from '../lib/payBiometric'
 import { APP } from '../lib/variant'
 import { colors, displayMode, onBackground, radius, setDisplayMode, type DisplayMode } from '../theme'
 import { ICON_SIZES, ICON_STYLES, setIconSize, setIconStyle, useIconSize, useIconStyle, type IconStyle } from '../lib/iconStyle'
@@ -52,7 +54,10 @@ function IconPreview({ style, icon, color }: { style: IconStyle; icon: IconName;
 
 /** Profile and settings, shared by the customer app and EcoCash Business. */
 export default function MeScreen() {
-  const { toast } = useMoqoqo()
+  const { toast, fail } = useMoqoqo()
+  const { askPin } = useDialogs()
+  const payBio = usePayBiometric()
+  const [payBioPossible] = useState(() => canUsePayBiometric())
   const { lang, setLang } = useLanguage()
   const t = useT()
   const { session, biometrics, setBiometricsEnabled, lock, signOut, updateUser, inBusiness, ownerName, closeBusiness } = useAuth()
@@ -138,12 +143,32 @@ export default function MeScreen() {
     { key: 'pin', icon: 'keypad-outline', color: '#5B2C9F', title: t.svc.changePin, subtitle: t.svc.changePinSub, onPress: () => router.push('/change-pin') },
     { key: 'phones', icon: 'phone-portrait-outline', color: '#16A34A', title: t.phones.title, subtitle: t.phones.meSub, onPress: () => router.push('/devices') },
     { key: 'pending', icon: 'hourglass-outline', color: '#D97706', title: t.svc.pending, subtitle: t.svc.pendingSub, onPress: () => router.push('/pending') },
+    { key: 'legal', icon: 'shield-checkmark-outline', color: '#0F766E', title: t.legal.title, subtitle: t.legal.meSub, onPress: () => router.push('/legal') },
     // Portal services open EcoCash Super App's service screens, which the EcoSure app doesn't have.
     ...(APP === 'ecosure' ? [] : meServices).map((sv) => ({
       key: sv.id, icon: serviceIcon(sv), color: sv.color, title: L(sv.name), subtitle: L(sv.description),
       onPress: () => router.push({ pathname: '/service/[id]', params: { id: sv.id } }),
     })),
   ]
+
+  // Fingerprint for payments: the PIN once, then the phone's keystore keeps the server's token behind the biometrics.
+  const togglePayBio = async () => {
+    setSheet(null)
+    if (payBio) {
+      await disablePayBiometric()
+      return toast(t.payBio.disabled)
+    }
+    if (!canUsePayBiometric()) return toast(t.payBio.unavailable)
+    const pin = await askPin({ label: t.payBio.pinLabel })
+    if (!pin) return
+    try {
+      await enablePayBiometric(pin, t.payBio.prompt)
+      toast(t.payBio.enabled)
+    } catch (e) {
+      if (e instanceof ApiFailure) fail(e)
+      else toast(t.payBio.failed)
+    }
+  }
 
   const toggleBiometrics = async () => {
     setSheet(null)
@@ -176,6 +201,12 @@ export default function MeScreen() {
         </View>
         <Icon name="qr-code-outline" size={26} color={colors.primary} />
       </Card>
+      {mode === 'business' && (
+        <Card style={{ marginTop: 14, paddingVertical: 4 }}>
+          <ListRow last onPress={() => router.push('/biz-profile')} left={<Avatar name="profile" icon="storefront" color="#E8590C" size={40} />}
+            title={t.bizProfile.title} subtitle={user?.code ? sub : undefined} right={<Icon name="chevron-forward" size={18} color={colors.muted} />} />
+        </Card>
+      )}
       {inBusiness && (
         <Card style={{ marginTop: 14, paddingVertical: 4 }}>
           <ListRow last onPress={closeBusiness} left={<Avatar name="back" icon="swap-horizontal" color={colors.primary} size={40} />}
@@ -230,6 +261,9 @@ export default function MeScreen() {
         <SheetOption icon={biometrics.face ? 'scan' : 'finger-print'} color="#5B2C9F" title={t.auth.unlockWith(bioKind)}
           subtitle={biometrics.available ? t.auth.bioStatus(bioKind, biometrics.enabled) : t.auth.bioMissing}
           selected={biometrics.enabled} onPress={toggleBiometrics} />
+        {payBioPossible && (
+          <SheetOption icon="finger-print" color="#0F766E" title={t.payBio.title} subtitle={t.payBio.sub(payBio)} selected={payBio} onPress={togglePayBio} />
+        )}
         <SheetOption icon="lock-closed" color="#0F766E" title={t.auth.lockNow} subtitle={t.auth.lockNowSub} onPress={() => { setSheet(null); lock() }} />
         <SheetOption icon="log-out" color="#DC2626" title={t.auth.logout} subtitle={user ? t.auth.logoutSub(maskMsisdn(user.msisdn)) : ''}
           onPress={() => setSheet('logout')} />
@@ -277,6 +311,7 @@ export default function MeScreen() {
           <SheetOption key={p} icon={p === 'everyone' ? 'globe-outline' : 'people'} color="#0F766E" title={t.friends.policies[p]} subtitle={t.friends.policyHints[p]}
             selected={p === policy} onPress={() => { setSheet(null); setPolicy(p) }} />
         ))}
+        <SheetOption icon="ban" color={colors.danger} title={t.block.meRow[0]} subtitle={t.block.meRow[1]} onPress={() => { setSheet(null); router.push('/blocked') }} />
       </Sheet>
 
       <Sheet visible={sheet === 'icons'} title={t.me.icons} onClose={() => setSheet(null)}>

@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.moqoqo.hce" >
+
+    <uses-sdk android:minSdkVersion="24" />
+    <!-- Tap to pay: this phone answers the merchant's NFC reader (host card emulation). Not required: phones without it pay by QR. -->
+    <uses-permission android:name="android.permission.NFC" />
+
+    <uses-feature
+        android:name="android.hardware.nfc.hce"
+        android:required="false" />
+
+    <application>
+        <service
+            android:name="com.moqoqo.hce.EcoCashHceService"
+            android:exported="true"
+            android:permission="android.permission.BIND_NFC_SERVICE" >
+            <intent-filter>
+                <action android:name="android.nfc.cardemulation.action.HOST_APDU_SERVICE" />
+            </intent-filter>
+
+            <meta-data
+                android:name="android.nfc.cardemulation.host_apdu_service"
+                android:resource="@xml/ecocash_apdu_service" />
+        </service>
+    </application>
+
+</manifest>

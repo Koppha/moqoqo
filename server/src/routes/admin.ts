@@ -1,16 +1,18 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
-import type {
-  Admin,
-  AdminLoginResponse,
-  AdminStats,
-  AdminTransaction,
-  AdminUser,
-  AppConfig,
-  AuditEntry,
-  MaintenanceWindow,
-  Page,
-  Role,
+import {
+  DEFAULT_DEVICE_SECURITY,
+  SECURITY_LIMITS,
+  type Admin,
+  type AdminLoginResponse,
+  type AdminStats,
+  type AdminTransaction,
+  type AdminUser,
+  type AppConfig,
+  type AuditEntry,
+  type MaintenanceWindow,
+  type Page,
+  type Role,
 } from '../../../shared/api'
 import type { Ctx } from '../context'
 import type { Queryable } from '../db/index'
@@ -21,8 +23,9 @@ import { hashSecret, hashToken, newId, newToken, verifySecret } from '../lib/cry
 import { fromCents, toCents } from '../lib/money'
 import { normalizeMsisdn } from '../lib/msisdn'
 import { iso, startOfMaseruDay } from '../lib/time'
-import { appConfig, currentMaintenance, setSetting, toWindow, windowStatus, type WindowRow } from '../services/maintenance'
-import { parsePin } from '../services/pins'
+import { logAuthEvent } from '../services/authLog'
+import { appConfig, currentMaintenance, deviceSecurity, setSetting, toWindow, windowStatus, type WindowRow } from '../services/maintenance'
+import { checkStrongPin, parsePin } from '../services/pins'
 import { toAdminTransactions } from '../services/transactions'
 import { toAdminUser, type UserRow } from '../services/users'
 import { WS_CLOSE } from './ws'
@@ -68,15 +71,43 @@ const zOwnerId = z.string().max(30).transform((v) => v.replace(/[\s-]/g, '').toU
 const zSemver = z.string().regex(/^\d+\.\d+\.\d+$/, 'must be a version like 1.2.0').nullable()
 const zDate = z.string().refine((s) => !Number.isNaN(Date.parse(s)), 'must be an ISO date')
 
+/** A PIN staff set for a customer: 4 digits and not easy to guess (DFS guidelines 3.2.5b-ii). */
+const strongPin = (pin: unknown) => {
+  const p = parsePin(pin)
+  checkStrongPin(p)
+  return p
+}
+
 export async function adminRoutes(app: FastifyInstance, ctx: Ctx, onConfigChange: () => Promise<void>) {
   const auth = { preHandler: authAdmin(ctx) }
 
   app.post('/admin/v1/login', async (req): Promise<AdminLoginResponse> => {
     const body = parse(z.object({ email: z.string().trim().toLowerCase(), password: z.string().min(1) }), req.body)
-    const [admin] = await ctx.db.query<AdminRow>('SELECT * FROM admins WHERE lower(email) = $1', [body.email])
+    const [admin] = await ctx.db.query<AdminRow & { failed_logins: number; locked: boolean }>(
+      `SELECT *, (locked_until IS NOT NULL AND locked_until > now()) AS locked FROM admins WHERE lower(email) = $1`,
+      [body.email],
+    )
+    // Locked after the portal's wrong-attempt limit, for its lock time (DFS guidelines 3.2.5b-v); every try is logged.
+    if (admin?.locked) {
+      await logAuthEvent(ctx.db, { adminId: admin.id, kind: 'login_failed', ip: req.ip, detail: 'locked' })
+      throw new AppError('PIN_LOCKED', 'Too many wrong passwords. This account is locked for a while; ask another admin or try later')
+    }
     if (!admin || !(await verifySecret(body.password, admin.password_hash, admin.password_salt))) {
+      if (admin) {
+        const policy = await deviceSecurity(ctx.db)
+        const [after] = await ctx.db.query<{ locked_until: Date | null }>(
+          `UPDATE admins SET
+             failed_logins = CASE WHEN failed_logins + 1 >= $2 THEN 0 ELSE failed_logins + 1 END,
+             locked_until = CASE WHEN failed_logins + 1 >= $2 THEN now() + make_interval(mins => $3) ELSE NULL END
+           WHERE id = $1 RETURNING locked_until`,
+          [admin.id, policy.maxPinAttempts, policy.pinLockMinutes],
+        )
+        await logAuthEvent(ctx.db, { adminId: admin.id, kind: after?.locked_until ? 'pin_locked' : 'login_failed', ip: req.ip, detail: 'wrong password' })
+      }
       throw new AppError('UNAUTHORIZED', 'Wrong email or password')
     }
+    if (admin.failed_logins > 0) await ctx.db.query('UPDATE admins SET failed_logins = 0, locked_until = NULL WHERE id = $1', [admin.id])
+    await logAuthEvent(ctx.db, { adminId: admin.id, kind: 'login', ip: req.ip })
     const token = newToken()
     await ctx.db.query('INSERT INTO admin_sessions (token_hash, admin_id) VALUES ($1, $2)', [hashToken(token), admin.id])
     req.log.info({ adminId: admin.id }, 'admin login')
@@ -198,7 +229,15 @@ export async function adminRoutes(app: FastifyInstance, ctx: Ctx, onConfigChange
       z.object({
         announcement: zLocalized.nullable(),
         minVersion: z.object({ customer: zSemver, business: zSemver, ecosure: zSemver.default(null), society: zSemver.default(null) }),
-        deviceSecurity: z.object({ blockRooted: z.boolean(), blockDeveloperMode: z.boolean() }).optional(),
+        deviceSecurity: z.object({
+          blockRooted: z.boolean(),
+          blockDeveloperMode: z.boolean(),
+          requireSimMatch: z.boolean().default(true),
+          idleMinutes: z.number().int().min(SECURITY_LIMITS.idleMinutes[0]).max(SECURITY_LIMITS.idleMinutes[1]).default(DEFAULT_DEVICE_SECURITY.idleMinutes),
+          sessionDays: z.number().int().min(SECURITY_LIMITS.sessionDays[0]).max(SECURITY_LIMITS.sessionDays[1]).default(DEFAULT_DEVICE_SECURITY.sessionDays),
+          maxPinAttempts: z.number().int().min(SECURITY_LIMITS.maxPinAttempts[0]).max(SECURITY_LIMITS.maxPinAttempts[1]).default(DEFAULT_DEVICE_SECURITY.maxPinAttempts),
+          pinLockMinutes: z.number().int().min(SECURITY_LIMITS.pinLockMinutes[0]).max(SECURITY_LIMITS.pinLockMinutes[1]).default(DEFAULT_DEVICE_SECURITY.pinLockMinutes),
+        }).optional(),
       }),
       req.body,
     )
@@ -263,7 +302,7 @@ export async function adminRoutes(app: FastifyInstance, ctx: Ctx, onConfigChange
       req.body,
     )
     const msisdn = normalizeMsisdn(body.msisdn)
-    const { hash, salt } = await hashSecret(parsePin(body.pin))
+    const { hash, salt } = await hashSecret(strongPin(body.pin))
     const user = await ctx.tx(async (q) => {
       const [exists] = await q.query('SELECT 1 FROM users WHERE msisdn = $1', [msisdn])
       if (exists) throw conflict(`${msisdn} already has a wallet`)
@@ -327,7 +366,7 @@ export async function adminRoutes(app: FastifyInstance, ctx: Ctx, onConfigChange
   app.post('/admin/v1/users/:id/reset-pin', auth, async (req, reply) => {
     const { id } = parse(z.object({ id: zId }), req.params)
     const body = parse(z.object({ pin: zPin }), req.body)
-    const { hash, salt } = await hashSecret(parsePin(body.pin))
+    const { hash, salt } = await hashSecret(strongPin(body.pin))
     await ctx.tx(async (q) => {
       await requireUserRow(q, id)
       await q.query('UPDATE users SET pin_hash = $2, pin_salt = $3, failed_pins = 0, locked_until = NULL WHERE id = $1', [id, hash, salt])

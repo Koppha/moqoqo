@@ -1,6 +1,6 @@
 import type { BetaTool } from '@anthropic-ai/sdk/resources/beta/messages/messages'
 import { z } from 'zod'
-import { MAX_TRANSACTION, type AssistantAction, type AssistantScreen, type SupportTopic } from '../../../shared/api'
+import { MAX_TRANSACTION, SUPPORT_TEAM, type AssistantAction, type AssistantScreen, type SupportTopic } from '../../../shared/api'
 import { openTicket } from '../services/support'
 import type { Ctx } from '../context'
 import { myClaims } from '../ecosure/claims'
@@ -12,6 +12,7 @@ import { postMessage } from '../services/chats'
 import { getTariff } from '../services/tariff'
 import { listTransactions } from '../services/transactions'
 import { getUser, type UserRow } from '../services/users'
+import { mySimSwap } from '../services/simSwap'
 
 // Tools the assistant can call. Read tools only see the signed-in user's own data. Prepare tools post an action card
 // into the chat; they never move money (the app opens its own screen and the user confirms with their PIN).
@@ -21,6 +22,8 @@ export interface ToolEnv {
   user: UserRow
   chatId: string
   assistantId: string
+  /** Where the person is talking to the receptionist (tickets record it). Default: in-app chat. */
+  channel?: 'chat' | 'app_voice' | 'phone'
 }
 
 interface ToolDef {
@@ -73,6 +76,15 @@ async function onePerson(env: ToolEnv, to: string): Promise<{ name: string; msis
   if (found.length === 1) return found[0]
   if (!found.length) return `No one matching "${to}" was found among the user's chats, and it is not a registered EcoCash number. Ask the user for the number.`
   return `More than one person matches "${to}": ${found.map((f) => `${f.name} (${f.msisdn})`).join(', ')}. Ask the user which one.`
+}
+
+/** Why a payment was stopped, in plain words. General on purpose: never the thresholds or how the score works. */
+const REFUSED_REASON: Record<string, string> = {
+  sim_swap: 'the number moved to a new SIM card recently, so money leaving EcoCash and larger payments are held for a while for safety',
+  new_device_cashout: 'a large cash-out soon after setting up EcoCash on a new phone',
+  velocity: 'many payments in a short time',
+  behaviour_score: 'it looked unusual for this account',
+  night_cashout: 'a large cash-out late at night',
 }
 
 export const TOOLS: Record<string, ToolDef> = {
@@ -318,6 +330,53 @@ export const TOOLS: Record<string, ToolDef> = {
     },
   },
 
+  get_account_security: {
+    tool: {
+      name: 'get_account_security',
+      description:
+        "The user's own account safety: whether money is held after a SIM change (and until when, and whether their phone reported its SIM missing), " +
+        'whether the PIN or the app is locked (and until when), whether sign-in codes go by email (travelling), and how many phones EcoCash is set up on.',
+      input_schema: { type: 'object', properties: {}, additionalProperties: false },
+    },
+    input: z.object({}),
+    async run(env) {
+      const u = (await getUser(env.ctx.db, env.user.id))!
+      const sim = await mySimSwap(env.ctx, u.id)
+      const [phones] = await env.ctx.db.query<{ n: number }>('SELECT count(*)::int AS n FROM bound_devices WHERE user_id = $1 AND unbound_at IS NULL', [u.id])
+      const until = (d: Date | null | undefined) => (d && new Date(d).getTime() > Date.now() ? maseru(d) : null)
+      return json({
+        simChangeHold: sim.held ? { until: sim.heldUntil ? maseru(sim.heldUntil) : null, reportedByTheirPhone: sim.deviceOpen } : null,
+        pinLockedUntil: until(u.locked_until),
+        appLockedUntil: until((u as UserRow & { app_locked_until?: Date | null }).app_locked_until),
+        codesByEmailUntil: until(u.codes_by_email_until),
+        phonesSetUp: phones?.n ?? 0,
+      })
+    },
+  },
+
+  get_refused_payments: {
+    tool: {
+      name: 'get_refused_payments',
+      description: "The user's own payments that EcoCash stopped for safety in the last 14 days: when, how much, what kind and the reason in plain words.",
+      input_schema: { type: 'object', properties: {}, additionalProperties: false },
+    },
+    input: z.object({}),
+    async run(env) {
+      const rows = await env.ctx.db.query<{ rule: string; amount_cents: string | null; kind: string | null; created_at: Date }>(
+        `SELECT rule, amount_cents, kind, created_at FROM risk_alerts WHERE user_id = $1 AND action = 'blocked' AND created_at > now() - interval '14 days'
+         ORDER BY created_at DESC LIMIT 10`,
+        [env.user.id],
+      )
+      if (!rows.length) return 'No payments were stopped in the last 14 days.'
+      return json(rows.map((r) => ({
+        date: maseru(r.created_at),
+        amount: r.amount_cents ? money(fromCents(Number(r.amount_cents))) : undefined,
+        kind: r.kind ?? undefined,
+        reason: REFUSED_REASON[r.rule] ?? 'a safety check',
+      })))
+    },
+  },
+
   hand_over_to_human: {
     tool: {
       name: 'hand_over_to_human',
@@ -329,15 +388,17 @@ export const TOOLS: Record<string, ToolDef> = {
         properties: {
           topic: { type: 'string', enum: ['payments', 'account', 'kyc', 'ecosure', 'cards_banks', 'fraud', 'other'] },
           summary: { type: 'string', description: 'One or two sentences: what happened and what the person needs. No PINs or codes.' },
+          urgent: { type: 'boolean', description: 'True for fraud, money taken or lost, a SIM changed without them, a lost or stolen phone, or someone else in their account.' },
         },
-        required: ['topic', 'summary'],
+        required: ['topic', 'summary', 'urgent'],
         additionalProperties: false,
       },
     },
-    input: z.object({ topic: z.enum(['payments', 'account', 'kyc', 'ecosure', 'cards_banks', 'fraud', 'other']), summary: z.string().min(5).max(400) }),
-    async run(env, input: { topic: SupportTopic; summary: string }) {
-      const ticket = await env.ctx.tx((q, out) => openTicket(q, out, env.user.id, input.topic, input.summary))
-      return `Ticket ${ticket.reference} opened. A person from EcoCash Support will answer in the "EcoCash Support" chat (in Chats). Tell the user that, with the reference.`
+    input: z.object({ topic: z.enum(['payments', 'account', 'kyc', 'ecosure', 'cards_banks', 'fraud', 'other']), summary: z.string().min(5).max(400), urgent: z.boolean().optional() }),
+    async run(env, input: { topic: SupportTopic; summary: string; urgent?: boolean }) {
+      const ticket = await env.ctx.tx((q, out) =>
+        openTicket(q, out, env.user.id, input.topic, input.summary, { priority: input.urgent || input.topic === 'fraud' ? 'urgent' : 'normal', channel: env.channel ?? 'chat' }))
+      return `Ticket ${ticket.reference} opened${ticket.priority === 'urgent' ? ' as urgent' : ''} for the ${SUPPORT_TEAM[ticket.topic]} team. A person will answer in the "EcoCash Support" chat (in Chats). Tell the user that, with the reference.`
     },
   },
 

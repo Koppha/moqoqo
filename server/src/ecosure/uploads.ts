@@ -5,6 +5,7 @@ import type { Queryable } from '../db/index'
 import { validation } from '../errors'
 import { newId } from '../lib/crypto'
 import type { UserRow } from '../services/users'
+import { openBytes, sealBytes } from '../lib/vault'
 
 export const MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 /** JSON body limit for the upload route: 10 MB as base64 (≈13.4 MB) plus room for the rest. */
@@ -40,7 +41,8 @@ export async function createUpload(q: Queryable, me: UserRow, body: EsUploadBody
   const id = newId()
   await q.query(
     `INSERT INTO ecosure_uploads (id, owner_id, file_name, content_type, size_bytes, sha256, content) VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-    [id, me.id, fileName, body.contentType, content.length, createHash('sha256').update(content).digest('hex'), content],
+    // Sealed at rest (DATA_KEYS); the hash is of the original file.
+    [id, me.id, fileName, body.contentType, content.length, createHash('sha256').update(content).digest('hex'), sealBytes(content)],
   )
   return { id, fileName, size: content.length }
 }
@@ -66,5 +68,5 @@ export async function readUpload(q: Queryable, id: string): Promise<{ fileName: 
     'SELECT file_name, content_type, content FROM ecosure_uploads WHERE id = $1',
     [id],
   )
-  return r ? { fileName: r.file_name, contentType: r.content_type, content: Buffer.from(r.content) } : null
+  return r ? { fileName: r.file_name, contentType: r.content_type, content: openBytes(r.content) } : null
 }

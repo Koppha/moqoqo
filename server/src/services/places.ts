@@ -68,3 +68,29 @@ export async function deletePlace(q: Queryable, id: string): Promise<Place> {
   if (!r) throw notFound('Place not found')
   return toPlace(r)
 }
+
+// ---------- a business's own listing (EcoCash Business › Business profile) ----------
+
+/** The listing of an agent or merchant: the place carrying its EcoCash code, enabled or not. */
+export async function businessListing(q: Queryable, biz: { role: string; code: string | null }): Promise<Place | null> {
+  if (!biz.code) return null
+  const [r] = await q.query<PlaceRow>(`SELECT * FROM places WHERE code = $1 AND kind = $2 ORDER BY enabled DESC, created_at LIMIT 1`, [biz.code, biz.role])
+  return r ? toPlace(r) : null
+}
+
+export interface ListingInput { name: string; address: string; hours?: string; phone?: string; lat?: number; lng?: number; listed: boolean }
+
+/**
+ * The business adds or edits its own listing. Its name always follows the business name EcoCash recorded; the code
+ * and kind follow the account, so a business can only describe itself. A new listing needs the shop's location.
+ */
+export async function saveBusinessListing(q: Queryable, biz: { id: string; role: 'agent' | 'merchant'; code: string | null }, b: ListingInput): Promise<Place> {
+  if (!biz.code) throw validation('This business has no EcoCash code yet. Visit an EcoCash shop')
+  const current = await businessListing(q, biz)
+  const lat = b.lat ?? current?.lat
+  const lng = b.lng ?? current?.lng
+  if (lat === undefined || lng === undefined) throw validation('Add the shop’s location: stand at the shop and use this phone’s location')
+  const body = check({ kind: biz.role, name: b.name, address: b.address, lat, lng, hours: b.hours, phone: b.phone, code: biz.code, enabled: b.listed })
+  if (!current) return createPlace(q, body, `business:${biz.id}`)
+  return updatePlace(q, current.id, body)
+}

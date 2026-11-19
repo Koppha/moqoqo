@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react'
-import type { Message, SupportTicket, SupportTicketDetail, SupportTopic, TicketStatus } from '../../../shared/api'
+import { SUPPORT_TEAM, type Message, type SupportTicket, type SupportTicketDetail, type SupportTopic, type TicketChannel, type TicketStatus } from '../../../shared/api'
 import { api, errorMessage } from '../api'
 import { useAuth } from '../auth'
 import { Dialog } from '../components/Dialog'
@@ -12,6 +12,7 @@ import { useAsync } from '../useAsync'
 export const TOPIC_LABEL: Record<SupportTopic, string> = {
   payments: 'Payments', account: 'Account / PIN', kyc: 'KYC', ecosure: 'EcoSure', cards_banks: 'Cards & banks', fraud: 'Fraud', other: 'Other',
 }
+const CHANNEL_LABEL: Record<TicketChannel, string> = { chat: 'App chat', app_voice: 'App voice', phone: 'Phone', merchant: 'Merchant' }
 const STATUS: Record<TicketStatus, { label: string; chip: string }> = {
   open: { label: 'Needs an answer', chip: 'chip-warn' },
   waiting: { label: 'Waiting for customer', chip: 'chip-neutral' },
@@ -54,13 +55,16 @@ function Inbox() {
             <div className="table-wrap">
               <table className="table">
                 <caption className="sr-only">Support tickets</caption>
-                <thead><tr><th scope="col">Ticket</th><th scope="col">Customer</th><th scope="col">Topic</th><th scope="col">What they need</th><th scope="col">Updated</th><th scope="col">Status</th></tr></thead>
+                <thead><tr><th scope="col">Ticket</th><th scope="col">Customer</th><th scope="col">Topic and team</th><th scope="col">What they need</th><th scope="col">Updated</th><th scope="col">Status</th></tr></thead>
                 <tbody>
                   {d.items.map((t) => (
                     <tr key={t.id} className="clickable" onClick={() => setOpen(t)}>
                       <td className="mono nowrap"><button type="button" className="link-button" onClick={() => setOpen(t)}>{t.reference}</button></td>
                       <td><div>{t.user.name}</div><div className="muted small">{formatMsisdn(t.user.msisdn)}</div></td>
-                      <td>{TOPIC_LABEL[t.topic]}</td>
+                      <td>
+                        <div>{t.priority === 'urgent' && t.status !== 'closed' && <span className="chip chip-bad">Urgent</span>} {TOPIC_LABEL[t.topic]}</div>
+                        <div className="muted small">{SUPPORT_TEAM[t.topic]} · {CHANNEL_LABEL[t.channel]}</div>
+                      </td>
                       <td className="cell-message">{t.summary}</td>
                       <td className="nowrap">{formatMaseru(t.updatedAt)}</td>
                       <td><span className={`chip ${STATUS[t.status].chip}`}>{STATUS[t.status].label}</span></td>

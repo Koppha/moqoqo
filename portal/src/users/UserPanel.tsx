@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react'
-import { APP_NAMES, type AdminUser, type BoundDevice } from '../../../shared/api'
+import { APP_NAMES, AUTH_EVENT_LABEL, SIM_CHECK_LABEL, type AdminUser, type BoundDevice, type SimSwapStatus } from '../../../shared/api'
 import { api, errorMessage } from '../api'
 import { ConfirmDialog, Dialog } from '../components/Dialog'
 import { useToast } from '../components/Toast'
@@ -89,6 +89,8 @@ export function UserPanel({ user: initial, onClose, onChanged }: { user: AdminUs
       <StatementPrint userId={user.id} />
 
       <PhonesSection userId={user.id} />
+      <SimSwapSection userId={user.id} />
+      <SignInActivity userId={user.id} />
 
       <h3 className="panel-subtitle">Recent transactions</h3>
       {recent.error ? (
@@ -263,6 +265,13 @@ function PhonesSection({ userId }: { userId: string }) {
                   Bound {formatMaseru(d.boundAt)}
                   {d.unboundAt ? ` · ${d.unboundReason === 'removed_by_staff' ? 'unbound by staff' : 'replaced by another phone'} ${formatMaseru(d.unboundAt)}` : d.lastSeenAt ? ` · last used ${formatMaseru(d.lastSeenAt)}` : ''}
                 </span>
+                {d.simCheck && <span className="muted small">SIM at first sign-in: {SIM_CHECK_LABEL[d.simCheck]}</span>}
+                {d.profile && (
+                  <span className="muted small">
+                    Usually: {[d.profile.nets.join('/'), d.profile.carriers.join('/'), d.profile.screens.join(', '), d.profile.timeZones.join(', ')].filter(Boolean).join(' · ')}
+                    {d.profile.areas ? ` · ${d.profile.areas} area${d.profile.areas === 1 ? '' : 's'}` : ''} · {d.profile.seen} requests learned
+                  </span>
+                )}
               </div>
               {d.unboundAt ? <span className="chip chip-neutral">Earlier</span> : <WriteButton size="sm" variant="danger" onClick={() => setConfirming(d)}>Unbind</WriteButton>}
             </li>
@@ -280,6 +289,168 @@ function PhonesSection({ userId }: { userId: string }) {
         />
       )}
     </>
+  )
+}
+
+/** Sign-ins, wrong PINs, locks, idle sign-outs, lost-phone reports (DFS guidelines 3.2.5b-vi), newest first. */
+function SignInActivity({ userId }: { userId: string }) {
+  const events = useAsync(() => api.users.authEvents(userId), [userId])
+  const [all, setAll] = useState(false)
+  const list = events.data ?? []
+  const shown = all ? list : list.slice(0, 8)
+  const warn = (k: string) => k === 'pin_locked' || k === 'reported_lost' || k === 'login_failed' || k === 'rate_limited'
+  return (
+    <>
+      <h3 className="panel-subtitle">Sign-in activity</h3>
+      {events.error ? <ErrorState error={events.error} onRetry={events.reload} /> : !events.data ? <Loading /> : list.length === 0 ? (
+        <p className="muted">Nothing recorded yet.</p>
+      ) : (
+        <>
+          <ul className="mini-list">
+            {shown.map((e) => (
+              <li key={e.id}>
+                <div>
+                  <span>{warn(e.kind) ? <span className="chip chip-warn">{AUTH_EVENT_LABEL[e.kind]}</span> : AUTH_EVENT_LABEL[e.kind]}{e.detail ? <span className="muted small"> · {e.detail}</span> : null}</span>
+                  <span className="muted small">{formatMaseru(e.createdAt)}{e.app ? ` · ${e.app}` : ''}{e.ip ? ` · ${e.ip}` : ''}</span>
+                </div>
+              </li>
+            ))}
+          </ul>
+          {list.length > 8 && <Button size="sm" onClick={() => setAll(!all)}>{all ? 'Show fewer' : `Show all ${list.length}`}</Button>}
+        </>
+      )}
+    </>
+  )
+}
+
+/**
+ * SIM swaps Econet reported for this number (or simulated here until Econet is connected). After a swap, money leaving
+ * EcoCash, large payments and new-phone setup are held for the hours set on Risk › Recent SIM swap; staff lift it
+ * once they have checked the owner in person.
+ */
+function SimSwapSection({ userId }: { userId: string }) {
+  const toast = useToast()
+  const status = useAsync(() => api.users.simSwaps(userId), [userId])
+  const [dialog, setDialog] = useState<'simulate' | 'clear' | null>(null)
+  const done = (next: SimSwapStatus, message: string) => {
+    status.setData(() => next)
+    toast.success(message)
+    setDialog(null)
+  }
+  const s = status.data
+  const holding = !!s && (s.held || !!s.setupBlockedUntil)
+  return (
+    <>
+      <h3 className="panel-subtitle">SIM swap</h3>
+      {status.error ? <ErrorState error={status.error} onRetry={status.reload} /> : !s ? <Loading /> : (
+        <>
+          <dl className="detail-list">
+            <div>
+              <dt>Hold</dt>
+              <dd>
+                {holding ? (
+                  <>
+                    <span className="chip chip-suspended">Held</span>{' '}
+                    {s.heldUntil && <>Money leaving EcoCash and large payments until {formatMaseru(s.heldUntil)}. </>}
+                    {s.setupBlockedUntil && <>No new phone until {formatMaseru(s.setupBlockedUntil)}.</>}
+                  </>
+                ) : <span className="muted">None</span>}
+              </dd>
+            </div>
+            <div>
+              <dt>Last SIM swap</dt>
+              <dd>{s.lastSwapAt ? formatMaseru(s.lastSwapAt) : <span className="muted">None reported</span>}</dd>
+            </div>
+            {s.clearedAt && (
+              <div>
+                <dt>Checked in person</dt>
+                <dd>{formatMaseru(s.clearedAt)}</dd>
+              </div>
+            )}
+          </dl>
+          {s.events.length > 0 && (
+            <ul className="mini-list">
+              {s.events.map((e) => (
+                <li key={e.id}>
+                  <div>
+                    <span>{formatMaseru(e.swappedAt)} <span className="muted small">· {e.source === 'simulated' ? 'simulated in the portal' : e.source === 'device' ? `seen by the customer's phone${e.detail ? `: ${e.detail}` : ''}` : 'reported by Econet'}</span></span>
+                    {e.clearedAt && <span className="muted small">Cleared {formatMaseru(e.clearedAt)} by {e.clearedBy}: {e.note}</span>}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+          <div className="panel-actions">
+            {holding && <WriteButton variant="primary" onClick={() => setDialog('clear')}>Owner checked in person</WriteButton>}
+            {s.simulated && <WriteButton onClick={() => setDialog('simulate')}>Simulate a SIM swap</WriteButton>}
+          </div>
+          {s.simulated && <p className="muted small">Econet isn’t connected yet: SIM swaps are simulated here for testing.</p>}
+        </>
+      )}
+      {dialog === 'simulate' && <SimulateSwapDialog userId={userId} onClose={() => setDialog(null)} onDone={(x) => done(x, 'SIM swap simulated. The customer was warned and payments are held.')} />}
+      {dialog === 'clear' && <ClearSwapDialog userId={userId} onClose={() => setDialog(null)} onDone={(x) => done(x, 'Hold lifted. Payments and new-phone setup work again.')} />}
+    </>
+  )
+}
+
+function SimulateSwapDialog({ userId, onClose, onDone }: { userId: string; onClose: () => void; onDone: (s: SimSwapStatus) => void }) {
+  const [hours, setHours] = useState('0')
+  const [error, setError] = useState<string>()
+  const [busy, setBusy] = useState(false)
+  const submit = async (e: FormEvent) => {
+    e.preventDefault()
+    const n = Number(hours)
+    if (!Number.isFinite(n) || n < 0 || n > 720) return setError('Hours ago: 0 to 720.')
+    setBusy(true)
+    try {
+      onDone(await api.users.simulateSimSwap(userId, { hoursAgo: n }))
+    } catch (err) {
+      setError(errorMessage(err))
+      setBusy(false)
+    }
+  }
+  return (
+    <Dialog title="Simulate a SIM swap" description="As if Econet reported that this number moved to a new SIM card. The customer gets a security alert, and the hold on Risk › Recent SIM swap applies." onClose={busy ? () => {} : onClose} size="sm">
+      <form onSubmit={submit} noValidate>
+        <Field label="How many hours ago" hint="0 = just now. Older than the hold’s hours holds nothing." error={error}>
+          {(p) => <input {...p} type="number" min={0} max={720} value={hours} onChange={(e) => setHours(e.target.value)} data-autofocus />}
+        </Field>
+        <div className="dialog-foot">
+          <Button onClick={onClose} disabled={busy}>Cancel</Button>
+          <Button type="submit" variant="primary" busy={busy}>Simulate</Button>
+        </div>
+      </form>
+    </Dialog>
+  )
+}
+
+function ClearSwapDialog({ userId, onClose, onDone }: { userId: string; onClose: () => void; onDone: (s: SimSwapStatus) => void }) {
+  const [note, setNote] = useState('')
+  const [error, setError] = useState<string>()
+  const [busy, setBusy] = useState(false)
+  const submit = async (e: FormEvent) => {
+    e.preventDefault()
+    if (note.trim().length < 3) return setError('Say how you checked the owner (for example: ID seen at Kingsway shop).')
+    setBusy(true)
+    try {
+      onDone(await api.users.clearSimSwap(userId, { note: note.trim() }))
+    } catch (err) {
+      setError(errorMessage(err))
+      setBusy(false)
+    }
+  }
+  return (
+    <Dialog title="Owner checked in person" description="Lift the SIM swap hold only after seeing the owner with their ID. Payments and new-phone setup work again at once. Recorded in the audit log." onClose={busy ? () => {} : onClose} size="sm">
+      <form onSubmit={submit} noValidate>
+        <Field label="How you checked" error={error}>
+          {(p) => <textarea {...p} rows={3} maxLength={300} value={note} onChange={(e) => setNote(e.target.value)} data-autofocus />}
+        </Field>
+        <div className="dialog-foot">
+          <Button onClick={onClose} disabled={busy}>Cancel</Button>
+          <Button type="submit" variant="primary" busy={busy}>Lift the hold</Button>
+        </div>
+      </form>
+    </Dialog>
   )
 }
 

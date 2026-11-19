@@ -4,11 +4,11 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 import { Keypad } from '../components/Keypad'
 import { PinEntry } from '../components/PinEntry'
 import { Avatar, Button, Icon, type IconName } from '../components/ui'
+import { payBiometricToken, usePayBiometric } from '../lib/payBiometric'
 import { useT } from '../i18n'
 import { fmt } from '../lib/format'
 import { FORM_MAX } from '../lib/layout'
 import { colors, radius } from '../theme'
-import { useAuth } from './Auth'
 
 // Promise-based amount and PIN prompts, so payment flows read top to bottom:
 //   const amount = await askAmount(...); const pin = await askPin(...)
@@ -120,22 +120,23 @@ function AmountScreen({ opts, onDone }: { opts: AmountOpts; onDone: (v: number |
 
 function PinScreen({ opts, onDone }: { opts: PinOpts; onDone: (v: string | null) => void }) {
   const t = useT()
-  const { biometrics, verifyBiometrics } = useAuth()
+  const payBio = usePayBiometric()
   const finish = async (pin: string) => {
     onDone(pin)
     return true
   }
-  // The mock accepts any PIN, so a passed biometric check stands in for one here. The real
-  // EcoCash API needs its own biometric-bound credential before this can replace the PIN.
+  // Fingerprint/face for payments: the phone's keystore releases the token the server issued for this phone, which
+  // the server accepts in place of the PIN (DFS guidelines 3.2.5b-iii). Cancelled or unreadable: type the PIN.
   const bio = async () => {
-    if (await verifyBiometrics()) onDone('1234')
+    const token = await payBiometricToken(t.payBio.prompt)
+    if (token) onDone(token)
   }
   return (
     <DialogFrame title={t.dialogs.enterPin} onClose={() => onDone(null)} footer={<Text style={d.demo}>{t.dialogs.pinDemo}</Text>}>
       <View style={d.lock}><Icon name="lock-closed" size={26} color={colors.primary} /></View>
       <Text style={d.pinLabel}>{opts.label}</Text>
       {opts.amount !== undefined && <Text style={d.pinAmount}>{fmt(opts.amount)}</Text>}
-      <PinEntry onComplete={finish} onBiometrics={biometrics.enabled ? bio : undefined} />
+      <PinEntry onComplete={finish} onBiometrics={payBio ? bio : undefined} />
     </DialogFrame>
   )
 }

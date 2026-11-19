@@ -34,9 +34,13 @@ export interface UserRow {
   message_policy?: 'everyone' | 'friends'
   email: string | null
   email_verified_at: Date | null
+  /** Travelling: sign-in codes go to the confirmed email until then (null = off). */
+  codes_by_email_until?: Date | null
   username: string | null
   /** National ID (sign-up ID check); NULL until verified. */
   id_number?: string | null
+  /** Staff checked the owner in person after a SIM swap: swaps up to then no longer hold anything. */
+  sim_swap_cleared_at?: Date | null
   /** Agent and merchant accounts: the owner's national ID, recorded by staff (portal). */
   owner_id_number?: string | null
   created_at: Date

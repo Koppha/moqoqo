@@ -504,6 +504,11 @@ a {
   color: var(--warn-text);
   font-weight: 600;
 }
+.chip-bad {
+  background: var(--danger-soft);
+  color: var(--danger-text);
+  font-weight: 600;
+}
 .chip-role-admin {
   background: var(--primary);
   color: #fff;
@@ -2551,4 +2556,116 @@ tr.clickable {
 }
 .stars-off {
   color: #d4d7df;
+}
+
+/* ---------- AI governance and cases ---------- */
+
+.stack {
+  display: grid;
+  gap: 16px;
+}
+.model-facts {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 6px 16px;
+  margin: 12px 0 0;
+  font-size: 13.5px;
+}
+.model-facts dt {
+  color: var(--muted);
+  font-weight: 600;
+}
+.model-facts dd {
+  margin: 0;
+}
+@media (max-width: 640px) {
+  .model-facts {
+    grid-template-columns: 1fr;
+  }
+  .model-facts dd {
+    margin-bottom: 6px;
+  }
+}
+.model-edit {
+  display: grid;
+  gap: 12px;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+.field-narrow {
+  width: 190px;
+}
+.histogram {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  height: 90px;
+  margin: 16px 0 0;
+}
+.histogram-col {
+  flex: 1;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: stretch;
+  gap: 4px;
+}
+.histogram-bar {
+  background: var(--primary-soft);
+  border-radius: 4px 4px 0 0;
+}
+.histogram-bar.over {
+  background: var(--warn);
+}
+.histogram-label {
+  font-size: 11px;
+  color: var(--muted);
+  text-align: center;
+}
+.reasons {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  font-size: 13px;
+}
+.ai-summary {
+  white-space: pre-wrap;
+  background: var(--info-soft);
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+  font-size: 14px;
+}
+.timeline {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+  max-height: 420px;
+  overflow-y: auto;
+}
+.timeline li {
+  border-left: 3px solid var(--border-strong);
+  padding-left: 10px;
+}
+.timeline .timeline-freeze,
+.timeline .timeline-closed {
+  border-left-color: var(--danger);
+}
+.timeline .timeline-summary {
+  border-left-color: var(--accent-blue);
+}
+.timeline-text {
+  white-space: pre-wrap;
+  font-size: 13.5px;
+}
+.row-flagged {
+  background: var(--danger-soft);
+}
+.amount-in {
+  color: var(--success-text);
+}
+.amount-out {
+  color: var(--text);
 }

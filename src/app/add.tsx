@@ -12,7 +12,8 @@ import { colors } from '../theme'
 
 /**
  * A person from their QR code or link (moqoqo://add?u=<userId>): add them as a friend, accept their request, or
- * message them when you're friends already.
+ * message them when you're friends already. Someone I blocked: unblock them here first. Someone who blocked me:
+ * adding them is refused with a neutral message (they aren't revealed).
  */
 export default function AddFriend() {
   const { u } = useLocalSearchParams<{ u?: string }>()
@@ -44,6 +45,20 @@ export default function AddFriend() {
     }
   }
 
+  const unblock = async () => {
+    if (!r) return
+    setBusy(true)
+    try {
+      await api(`/v1/blocks/${r.user.id}`, { method: 'DELETE' })
+      toast(t.block.unblocked(r.user.name))
+      load()
+    } catch (e) {
+      fail(e)
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const message = async () => {
     if (!r) return
     const id = await startChat(r.user.msisdn)
@@ -58,7 +73,12 @@ export default function AddFriend() {
           <Avatar name={r.user.name} size={72} photo={r.user.photo} />
           <Text style={s.name}>{r.user.name}</Text>
           <Text style={s.muted}>{r.user.username ? `@${r.user.username} · ` : ''}{maskMsisdn(r.user.msisdn)}</Text>
-          {r.relation === 'self' ? <Text style={[s.muted, { marginTop: 16 }]}>{t.friends.you}</Text>
+          {r.blockedByMe ? (
+            <>
+              <Text style={[s.muted, { marginTop: 16 }]}>{t.block.bar(r.user.name)}</Text>
+              <Button label={t.block.unblock} icon="lock-open-outline" variant="ghost" disabled={busy} onPress={unblock} style={s.btn} />
+            </>
+          ) : r.relation === 'self' ? <Text style={[s.muted, { marginTop: 16 }]}>{t.friends.you}</Text>
             : r.relation === 'friend' ? <Button label={t.friends.message} icon="chatbubble" onPress={message} style={s.btn} />
             : r.relation === 'outgoing' ? <Button label={t.friends.requested} icon="time-outline" variant="ghost" disabled style={s.btn} />
             : <Button label={r.relation === 'incoming' ? t.friends.accepted : t.friends.addFriend} icon="person-add" disabled={busy} onPress={add} style={s.btn} />}

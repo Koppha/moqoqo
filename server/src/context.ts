@@ -1,5 +1,5 @@
 import type { FastifyBaseLogger } from 'fastify'
-import type { Assistant } from './assistant/index'
+import type { Assistant, AssistantModel } from './assistant/index'
 import type { Config } from './config'
 import type { Db, Queryable } from './db/index'
 import type { Ledger } from './ecocash/index'
@@ -7,8 +7,10 @@ import type { BankGateway } from './gateways/banks'
 import type { CardGateway } from './gateways/cards'
 import type { EcoCashServices } from './gateways/ecocash'
 import type { HomeAffairs } from './gateways/homeaffairs'
+import type { NumberVerify } from './gateways/numberverify'
 import type { PinlessGateway } from './gateways/pinless'
 import type { RemitGateway } from './gateways/remit'
+import type { SimSwapSource } from './gateways/simswap'
 import type { Notifier } from './notify/index'
 import { Hub } from './realtime/hub'
 import { Outbox } from './realtime/outbox'
@@ -32,11 +34,17 @@ export interface Ctx {
   services: EcoCashServices
   /** National ID register (mock until integrated). */
   homeAffairs: HomeAffairs
+  /** When a number last moved to a new SIM (Econet; mock answers from recorded/simulated swaps). */
+  simSwap: SimSwapSource
+  /** The number a request's mobile-data connection belongs to (Econet header enrichment; mock: unknown). */
+  numberVerify: NumberVerify
   log: FastifyBaseLogger
   /** Push, SMS and email, honouring each user's choices. */
   notifier: Notifier
   /** The EcoCash Assistant (set once the app is built). */
   assistant: Assistant
+  /** Claude, for AI features beyond the assistant (case summaries); null without ANTHROPIC_API_KEY. */
+  llm: AssistantModel | null
   /** Runs fn in a DB transaction and delivers the collected realtime events after COMMIT. */
   /** Called after COMMIT for every wallet that received money (split bills collect what is owed). */
   onCredit?: (userId: string) => void
@@ -44,13 +52,13 @@ export interface Ctx {
   publish(out: Outbox): void
 }
 
-export function createCtx(parts: Omit<Ctx, 'tx' | 'publish' | 'assistant'>): Ctx {
+export function createCtx(parts: Omit<Ctx, 'tx' | 'publish' | 'assistant' | 'llm'>): Ctx {
   // The outbox of the transaction each Queryable belongs to, so ledger transfers can queue money alerts.
   const outboxes = new WeakMap<Queryable, Outbox>()
   const ledger: Ledger = {
     async transfer(q, input) {
       await checkKyc(q, input)
-      const flags = await checkRisk(q, input)
+      const flags = await checkRisk(q, input, parts.simSwap)
       const result = await parts.ledger.transfer(q, input)
       await afterTransfer(q, result.tx, flags)
       outboxes.get(q)?.transfers.push(result)
@@ -61,6 +69,7 @@ export function createCtx(parts: Omit<Ctx, 'tx' | 'publish' | 'assistant'>): Ctx
     ...parts,
     ledger,
     assistant: null as unknown as Assistant,
+    llm: null,
     publish(out) {
       for (const { userId, event } of out.events) ctx.hub.send(userId, event)
       for (const notice of out.notices) void ctx.notifier.send(notice)

@@ -8,6 +8,7 @@ import { logAssistant } from '../services/support'
 import { assistantAccount } from './account'
 import { SYSTEM_PROMPT } from './prompt'
 import { maseru, TOOL_LIST, TOOLS, type ToolEnv } from './tools'
+import { openText, sealText } from '../lib/vault'
 
 /** The one call the assistant makes to Claude; tests pass a fake. */
 export interface AssistantModel {
@@ -159,7 +160,7 @@ export function createAssistant(ctx: Ctx, model: AssistantModel | null, opts: As
       const [row] = await ctx.db.query<{ seq: string }>('INSERT INTO assistant_turns (chat_id, role, content) VALUES ($1, $2, $3) RETURNING seq', [
         chatId,
         t.role,
-        JSON.stringify(t.content),
+        sealText(JSON.stringify(t.content)),
       ])
       if (!first) first = Number(row.seq)
     }
@@ -168,7 +169,7 @@ export function createAssistant(ctx: Ctx, model: AssistantModel | null, opts: As
 
   async function loadHistory(chatId: string): Promise<BetaMessageParam[]> {
     const rows = await ctx.db.query<{ role: 'user' | 'assistant'; content: string }>('SELECT role, content FROM assistant_turns WHERE chat_id = $1 ORDER BY seq', [chatId])
-    return rows.map((r) => ({ role: r.role, content: JSON.parse(r.content) as BetaContentBlockParam[] }))
+    return rows.map((r) => ({ role: r.role, content: JSON.parse(openText(r.content)) as BetaContentBlockParam[] }))
   }
 
   /**
@@ -180,7 +181,7 @@ export function createAssistant(ctx: Ctx, model: AssistantModel | null, opts: As
     const [{ n }] = await ctx.db.query<{ n: number }>('SELECT count(*)::int AS n FROM assistant_turns WHERE chat_id = $1', [chatId])
     if (n <= HISTORY_MAX) return
     const rows = (await ctx.db.query<{ seq: string; role: string; content: string }>('SELECT seq, role, content FROM assistant_turns WHERE chat_id = $1 ORDER BY seq', [chatId])).map(
-      (r) => ({ ...r, content: JSON.parse(r.content) as BetaContentBlockParam[] }),
+      (r) => ({ ...r, content: JSON.parse(openText(r.content)) as BetaContentBlockParam[] }),
     )
     let start = rows.length - HISTORY_KEEP
     while (start < rows.length && !(rows[start].role === 'user' && rows[start].content.every((b) => b.type === 'text'))) start++
@@ -189,7 +190,7 @@ export function createAssistant(ctx: Ctx, model: AssistantModel | null, opts: As
       for (const r of rows.slice(start)) {
         if (r.role !== 'assistant') continue
         const kept = r.content.filter((b) => b.type !== 'thinking' && b.type !== 'redacted_thinking')
-        if (kept.length !== r.content.length) await q.query('UPDATE assistant_turns SET content = $2 WHERE seq = $1', [r.seq, JSON.stringify(kept)])
+        if (kept.length !== r.content.length) await q.query('UPDATE assistant_turns SET content = $2 WHERE seq = $1', [r.seq, sealText(JSON.stringify(kept))])
       }
     })
   }

@@ -18,7 +18,7 @@ import { useAppMode } from '../../state/Auth'
 import { useMoqoqo } from '../../state/useMoqoqo'
 import { colors, radius } from '../../theme'
 
-type Menu = 'actions' | 'request' | 'bills' | 'members' | 'group' | null
+type Menu = 'actions' | 'request' | 'bills' | 'members' | 'group' | 'person' | null
 
 /** A chat from someone who isn't a friend: accept it (a normal chat, with notifications) or delete it. */
 function RequestBanner({ chatId, name }: { chatId: string; name: string }) {
@@ -110,6 +110,25 @@ export default function ChatScreen() {
       },
     ])
   }
+  // One to one with another customer (not a merchant, agent or official account): they can be blocked.
+  const blockable = !chat.group && !chat.official && chat.other?.role === 'customer' && mode !== 'business'
+  const setBlocked = async (block: boolean) => {
+    try {
+      await (block ? api('/v1/blocks', { body: { userId: chat.other!.id } }) : api(`/v1/blocks/${chat.other!.id}`, { method: 'DELETE' }))
+      dispatch({ type: 'chats', chats: await loadChats() })
+      toast(block ? t.block.blocked(chat.name) : t.block.unblocked(chat.name))
+    } catch (e) {
+      fail(e)
+    }
+  }
+  const askBlock = () => {
+    setMenu(null)
+    const [title, body] = t.block.confirm(chat.name)
+    Alert.alert(title, body, [
+      { text: t.split.cancel, style: 'cancel' },
+      { text: t.block.block, style: 'destructive', onPress: () => setBlocked(true) },
+    ])
+  }
   const typing = !!state.typing[id]
   // A new assistant chat: a few ideas to start with.
   const showIdeas = chat.assistant && !chat.messages.some((m) => m.from === 'me')
@@ -141,7 +160,8 @@ export default function ChatScreen() {
           <Text style={x.sub}>{chat.assistant ? (typing ? t.assistant.typing : t.assistant.subtitle) : chat.msisdn ? maskMsisdn(chat.msisdn) : chat.official ? t.chat.official : t.common.group}</Text>
         </View>
         {chat.group ? <CircleIconButton icon="ellipsis-vertical" label={t.chat.groupMenu} onPress={() => setMenu('group')} />
-          : !chat.assistant && <CircleIconButton icon="call-outline" label={t.common.call} onPress={() => toast(t.common.voiceCall)} />}
+          : !chat.assistant && !chat.blockedByMe && <CircleIconButton icon="call-outline" label={t.common.call} onPress={() => toast(t.common.voiceCall)} />}
+        {blockable && <CircleIconButton icon="ellipsis-vertical" label={t.block.menu} onPress={() => setMenu('person')} />}
       </View>
 
       {chat.request && <RequestBanner chatId={chat.id} name={chat.name} />}
@@ -181,6 +201,11 @@ export default function ChatScreen() {
           </View>
         ) : chat.official ? (
           <Text style={[x.officialNote, { paddingBottom: 14 + insets.bottom }]}>{t.chat.official}</Text>
+        ) : chat.blockedByMe ? (
+          <View style={[x.composer, x.blockedBar, { paddingBottom: 10 + insets.bottom }]}>
+            <Text style={x.blockedText}>{t.block.bar(chat.name)}</Text>
+            <Button label={t.block.unblock} variant="ghost" onPress={() => setBlocked(false)} style={{ marginTop: 0 }} />
+          </View>
         ) : (
         <View style={[x.composer, { paddingBottom: 10 + insets.bottom }]}>
           <Pressable accessibilityRole="button" accessibilityLabel={t.chat.moneyAndMore} onPress={() => setMenu('actions')} style={x.plus}>
@@ -193,6 +218,12 @@ export default function ChatScreen() {
         </View>
         )}
       </KeyboardAvoidingView>
+
+      <Sheet visible={menu === 'person'} title={chat.name} onClose={() => setMenu(null)}>
+        {chat.blockedByMe
+          ? <SheetOption icon="lock-open-outline" color={colors.primary} title={t.block.unblock} subtitle="" onPress={() => { setMenu(null); setBlocked(false) }} />
+          : <SheetOption icon="ban" color={colors.danger} title={t.block.block} subtitle={t.block.blockSub} onPress={askBlock} />}
+      </Sheet>
 
       <Sheet visible={menu === 'group'} title={chat.name} onClose={() => setMenu(null)}>
         <SheetOption icon={mine ? 'trash' : 'exit-outline'} color={colors.danger} title={mine ? t.chat.deleteGroup[0] : t.chat.leaveGroup[0]}
@@ -242,6 +273,8 @@ const x = StyleSheet.create({
   name: { fontSize: 16, fontWeight: '700', color: colors.text },
   sub: { fontSize: 12, color: colors.muted },
   msgs: { padding: 16, gap: 10, width: '100%', maxWidth: CONTENT_MAX, alignSelf: 'center' },
+  blockedBar: { justifyContent: 'space-between' },
+  blockedText: { flex: 1, color: colors.muted, fontSize: 14.5 },
   composer: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12, paddingTop: 10, backgroundColor: colors.surface, borderTopLeftRadius: radius.lg, borderTopRightRadius: radius.lg, width: '100%', maxWidth: CONTENT_MAX, alignSelf: 'center' },
   plus: { width: 44, height: 44, borderRadius: 22, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
   input: { flex: 1, height: 44, backgroundColor: colors.surface2, borderRadius: radius.pill, paddingHorizontal: 16, fontSize: 15, color: colors.text },

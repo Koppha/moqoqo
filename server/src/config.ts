@@ -25,6 +25,21 @@ export interface Config {
   deviceBinding: boolean
   /** Test builds may say "pretend I'm on Econet" (emulators have test SIMs). Must be false in production. */
   allowSimulatedNetwork: boolean
+  /** Shared secret Econet sends as x-webhook-secret to POST /v1/hooks/sim-swap; null = webhook off. */
+  simSwapWebhookSecret: string | null
+  /** Econet's SIM swap API (ECONET_SIMSWAP_URL + ECONET_SIMSWAP_KEY); null = MockSimSwap (swaps simulated in the portal). */
+  econetSimSwap: { url: string; key: string; header: string; cacheSeconds: number; timeoutMs: number } | null
+  /** Per-connection limit on sign-in, PIN and sign-up attempts (on unless RATE_LIMIT=false). */
+  rateLimit: boolean
+  /** Android SMS Retriever app hashes per app, from SMS_APP_HASHES="customer:AbC123xyZ_1,business:…". */
+  smsAppHashes: Partial<Record<string, string>>
+  /** Field encryption keys, "kid:base64-32-bytes,…" (first = current); unset = stored as is (development). */
+  dataKeys: string | null
+  /** Serve https directly with these PEM files (otherwise TLS ends at the proxy). */
+  tlsCertFile: string | null
+  tlsKeyFile: string | null
+  /** Refuse any request that didn't arrive over https (directly or as X-Forwarded-Proto from the proxy). */
+  requireTls: boolean
 }
 
 const DEFAULT_ORIGINS = [
@@ -54,5 +69,21 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     assistantEffort: env.ASSISTANT_EFFORT === 'low' || env.ASSISTANT_EFFORT === 'high' ? env.ASSISTANT_EFFORT : 'medium',
     deviceBinding: env.DEVICE_BINDING !== 'false',
     allowSimulatedNetwork: env.ALLOW_SIMULATED_NETWORK !== 'false',
+    simSwapWebhookSecret: env.SIM_SWAP_WEBHOOK_SECRET?.trim() || null,
+    econetSimSwap: env.ECONET_SIMSWAP_URL?.trim() && env.ECONET_SIMSWAP_KEY?.trim()
+      ? {
+          url: env.ECONET_SIMSWAP_URL.trim(),
+          key: env.ECONET_SIMSWAP_KEY.trim(),
+          header: env.ECONET_SIMSWAP_HEADER?.trim() || 'Authorization',
+          cacheSeconds: Number(env.ECONET_SIMSWAP_CACHE_SECONDS) > 0 ? Number(env.ECONET_SIMSWAP_CACHE_SECONDS) : 300,
+          timeoutMs: 4000,
+        }
+      : null,
+    rateLimit: env.RATE_LIMIT !== 'false',
+    dataKeys: env.DATA_KEYS?.trim() || null,
+    tlsCertFile: env.TLS_CERT_FILE?.trim() || null,
+    tlsKeyFile: env.TLS_KEY_FILE?.trim() || null,
+    requireTls: env.REQUIRE_TLS === 'true',
+    smsAppHashes: Object.fromEntries((env.SMS_APP_HASHES ?? '').split(',').map((p) => p.trim().split(':')).filter((x) => x.length === 2 && /^[A-Za-z0-9+/_-]{11}$/.test(x[1]))),
   }
 }

@@ -7,7 +7,7 @@ import { KIND_LABEL } from './pages/Transactions'
 import { mockFetch, renderApp, SUPPORT } from './test/utils'
 
 const tariff: Tariff = { cardTopupFeePercent: 2, cardTopupFeeMin: 1, cardTopupMax: 5000, bankTransferFee: 10, bankTransferMax: 10000, dailyMax: 20000, atmFee: 5, atmMax: 3000 }
-const config: AppConfig = { ussd: USSD_DEFAULTS, maintenance: null, announcement: null, minVersion: { customer: null, business: null, ecosure: null, society: null }, deviceSecurity: { blockRooted: false, blockDeveloperMode: false }, serverTime: '2026-10-12T08:00:00.000Z', branding: { logo: null, miniAppIcons: {} }, contact: CONTACT_DEFAULTS }
+const config: AppConfig = { ussd: USSD_DEFAULTS, maintenance: null, announcement: null, minVersion: { customer: null, business: null, ecosure: null, society: null }, deviceSecurity: { blockRooted: false, blockDeveloperMode: false, requireSimMatch: true, idleMinutes: 15, sessionDays: 30, maxPinAttempts: 5, pinLockMinutes: 15 }, serverTime: '2026-10-12T08:00:00.000Z', branding: { logo: null, miniAppIcons: {} }, contact: CONTACT_DEFAULTS }
 const values = (over: Partial<Record<keyof Tariff, string>> = {}) =>
   ({ ...Object.fromEntries(Object.entries(tariff).map(([k, v]) => [k, String(v)])), ...over }) as Record<keyof Tariff, string>
 

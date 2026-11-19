@@ -2,13 +2,15 @@
 // A person links the agent or merchant accounts they own, once: their verified ID must match the owner ID EcoCash
 // recorded for the business (portal), and they enter the business PIN. Opening one starts a
 // business session from the person's EcoCash Super App, so they don't sign in again; unlinking ends those sessions.
-import { BUSINESS_LINKS_MAX, type LinkedBusiness, type LoginResponse } from '../../../shared/api'
+import { BUSINESS_LINKS_MAX, type BusinessListingBody, type BusinessProfile, type LinkedBusiness, type LoginResponse } from '../../../shared/api'
 import type { Ctx } from '../context'
 import type { Queryable } from '../db/index'
 import { AppError, conflict, forbidden, notFound, validation } from '../errors'
 import { hashToken, newToken } from '../lib/crypto'
 import { normalizeMsisdn } from '../lib/msisdn'
+import { iso } from '../lib/time'
 import { checkPin } from './pins'
+import { businessListing, saveBusinessListing } from './places'
 import { toMe, type UserRow } from './users'
 
 const toLinked = (u: UserRow): LinkedBusiness => ({
@@ -96,4 +98,44 @@ export async function openBusiness(ctx: Ctx, me: UserRow, app: string, boundDevi
   )
   const [fresh] = await ctx.db.query<UserRow>('UPDATE users SET last_seen_at = now() WHERE id = $1 RETURNING *', [biz.id])
   return { token, user: toMe(fresh) }
+}
+
+// ---------- inside the business: its profile and map listing ----------
+
+function requireBusiness(me: UserRow): asserts me is UserRow & { role: 'agent' | 'merchant' } {
+  if (me.role !== 'agent' && me.role !== 'merchant') throw forbidden('Only agents and merchants have a business profile')
+}
+
+export async function businessProfile(q: Queryable, me: UserRow): Promise<BusinessProfile> {
+  requireBusiness(me)
+  const [{ n }] = await q.query<{ n: number }>('SELECT count(*)::int AS n FROM business_links WHERE business_id = $1', [me.id])
+  const [row] = await q.query<{ created_at: Date }>('SELECT created_at FROM users WHERE id = $1', [me.id])
+  return {
+    name: me.business_name ?? me.name,
+    holder: me.name,
+    role: me.role,
+    code: me.code,
+    msisdn: me.msisdn ?? '',
+    kycTier: me.kyc_tier,
+    status: me.status,
+    openedAt: iso(row.created_at),
+    linkedPeople: Number(n),
+    listing: await businessListing(q, me),
+  }
+}
+
+export async function saveBusinessProfile(ctx: Ctx, me: UserRow, body: BusinessListingBody): Promise<BusinessProfile> {
+  requireBusiness(me)
+  const text = (s: string | undefined, max: number, field: string) => {
+    const v = s?.trim() ?? ''
+    if (v.length > max) throw validation(`${field} is too long (${max} characters at most)`)
+    return v || undefined
+  }
+  const address = text(body.address, 120, 'Address')
+  if (!address || address.length < 5) throw validation('Write where the shop is: street, area and town')
+  const phone = body.phone?.trim() ? normalizeMsisdn(body.phone, 'phone') : undefined
+  await ctx.db.tx((q) => saveBusinessListing(q, me, {
+    name: me.business_name ?? me.name, address, hours: text(body.hours, 80, 'Opening hours'), phone, lat: body.lat, lng: body.lng, listed: body.listed,
+  }))
+  return businessProfile(ctx.db, me)
 }

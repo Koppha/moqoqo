@@ -20,6 +20,11 @@ const API_URL = Platform.OS === 'android' && !Device.isDevice && /^http:\/\/(loc
 
 /** Only test builds talking to a local server over http may change it. */
 export const CAN_CHANGE_SERVER = API_URL.startsWith('http://')
+/**
+ * A release build pointed at plain http (DFS guidelines 3.2.4a, 3.2.6g): it refuses to run. Development builds, and
+ * test builds made with EXPO_PUBLIC_ALLOW_HTTP=true, may use http.
+ */
+export const INSECURE_RELEASE = !__DEV__ && API_URL.startsWith('http://') && process.env.EXPO_PUBLIC_ALLOW_HTTP !== 'true'
 
 let current = API_URL
 

@@ -16,6 +16,9 @@ import { SupportPage } from './pages/Support'
 import { AnalyticsPage } from './pages/Analytics'
 import { PerformancePage } from './pages/Performance'
 import { RiskPage } from './pages/Risk'
+import { CasesPage } from './pages/Cases'
+import { AiGovernancePage } from './pages/AiGovernance'
+import { SignInMonitorPage } from './pages/SignInMonitor'
 import { RemittancePage } from './pages/Remittance'
 import { DonatePage } from './pages/Donate'
 import { UssdPage } from './pages/Ussd'
@@ -65,6 +68,10 @@ export function AppRoutes() {
         <Route path="analytics" element={<AnalyticsPage />} />
         <Route path="performance" element={<PerformancePage />} />
         <Route path="risk" element={<RiskPage />} />
+        <Route path="cases" element={<CasesPage />} />
+        <Route path="cases/:id" element={<CasesPage />} />
+        <Route path="ai-governance" element={<AiGovernancePage />} />
+        <Route path="sign-ins" element={<SignInMonitorPage />} />
         <Route path="notifications" element={<NotificationsPage />} />
         <Route path="audit" element={<AuditPage />} />
         <Route path="settings" element={<SettingsPage />} />

@@ -33,7 +33,7 @@ export interface TestServer {
 
 /** Fresh in-memory PGlite with the demo seed. */
 export async function startTestServer(deps: AppDeps = {}, overrides: Partial<Config> = {}): Promise<TestServer> {
-  const config = { ...loadConfig({}), dataDir: null, databaseUrl: null, adminEmail: ADMIN.email, adminPassword: ADMIN.password, deviceBinding: false, ...overrides }
+  const config = { ...loadConfig({}), dataDir: null, databaseUrl: null, adminEmail: ADMIN.email, adminPassword: ADMIN.password, deviceBinding: false, rateLimit: false, ...overrides }
   const server = await createServer(config, { logger: false, assistantModel: null, ...deps })
   const call = async (method: string, url: string, body?: unknown, token?: string) => {
     const res = await server.app.inject({

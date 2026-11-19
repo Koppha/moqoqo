@@ -8,6 +8,27 @@ import type { BillCategory, BillCategoryBody,
   RiskAlertStatus,
   RiskReviewBody,
   RiskRule,
+  AiDecision,
+  AiModel,
+  AiModelBody,
+  AiModelKey,
+  AiModelVersion,
+  AiOutcome,
+  CaseCloseBody,
+  CaseFreezeBody,
+  CaseOpenBody,
+  CasePriority,
+  CaseStats,
+  CaseStatus,
+  CaseStrBody,
+  CaseUpdateBody,
+  FraudCase,
+  FraudCaseDetail,
+  AuthEvent,
+  AuthMonitor,
+  SimSwapClearBody,
+  SimSwapSimulateBody,
+  SimSwapStatus,
   SupportStats,
   SupportTicket,
   SupportTicketDetail,
@@ -341,6 +362,10 @@ export const api = {
     devices: (id: string) => request<BoundDevice[]>('GET', `${A}/users/${encodeURIComponent(id)}/devices`),
     unbind: (id: string, deviceId: string) =>
       request<BoundDevice[]>('POST', `${A}/users/${encodeURIComponent(id)}/devices/${encodeURIComponent(deviceId)}/unbind`),
+    authEvents: (id: string) => request<AuthEvent[]>('GET', `${A}/users/${encodeURIComponent(id)}/auth-events`),
+    simSwaps: (id: string) => request<SimSwapStatus>('GET', `${A}/users/${encodeURIComponent(id)}/sim-swaps`),
+    simulateSimSwap: (id: string, body: SimSwapSimulateBody) => request<SimSwapStatus>('POST', `${A}/users/${encodeURIComponent(id)}/sim-swaps/simulate`, { body }),
+    clearSimSwap: (id: string, body: SimSwapClearBody) => request<SimSwapStatus>('POST', `${A}/users/${encodeURIComponent(id)}/sim-swaps/clear`, { body }),
   },
 
   transactions: (q: TransactionQuery) =>
@@ -415,6 +440,29 @@ export const api = {
     review: (id: string, body: RiskReviewBody) => request<RiskAlert>('POST', `${A}/risk/alerts/${encodeURIComponent(id)}/review`, { body }),
     rules: () => request<RiskRule[]>('GET', `${A}/risk/rules`),
     setRules: (body: RiskRule[]) => request<RiskRule[]>('PUT', `${A}/risk/rules`, { body }),
+  },
+
+  authMonitor: (days: number) => request<AuthMonitor>('GET', `${A}/auth-monitor`, { query: { days } }),
+
+  ai: {
+    models: () => request<AiModel[]>('GET', `${A}/ai/models`),
+    setModel: (key: AiModelKey, body: AiModelBody) => request<AiModel>('PUT', `${A}/ai/models/${key}`, { body }),
+    versions: (key: AiModelKey) => request<AiModelVersion[]>('GET', `${A}/ai/models/${key}/versions`),
+    decisions: (q: { model?: AiModelKey | ''; outcome?: AiOutcome | ''; page?: number; pageSize?: number }) =>
+      request<Page<AiDecision>>('GET', `${A}/ai/decisions`, { query: { ...q } }),
+  },
+
+  cases: {
+    list: (q: { status?: CaseStatus | 'active' | ''; priority?: CasePriority | ''; mine?: '1' | ''; page?: number; pageSize?: number }) =>
+      request<Page<FraudCase>>('GET', `${A}/cases`, { query: { ...q } }),
+    stats: () => request<CaseStats>('GET', `${A}/cases/stats`),
+    open: (body: CaseOpenBody) => request<FraudCaseDetail>('POST', `${A}/cases`, { body }),
+    get: (id: string) => request<FraudCaseDetail>('GET', `${A}/cases/${encodeURIComponent(id)}`),
+    update: (id: string, body: CaseUpdateBody) => request<FraudCaseDetail>('PATCH', `${A}/cases/${encodeURIComponent(id)}`, { body }),
+    close: (id: string, body: CaseCloseBody) => request<FraudCaseDetail>('POST', `${A}/cases/${encodeURIComponent(id)}/close`, { body }),
+    freeze: (id: string, body: CaseFreezeBody) => request<FraudCaseDetail>('POST', `${A}/cases/${encodeURIComponent(id)}/freeze`, { body }),
+    summary: (id: string) => request<FraudCaseDetail>('POST', `${A}/cases/${encodeURIComponent(id)}/summary`),
+    fileStr: (id: string, body: CaseStrBody) => request<FraudCaseDetail>('POST', `${A}/cases/${encodeURIComponent(id)}/str`, { body }),
   },
 
   support: {

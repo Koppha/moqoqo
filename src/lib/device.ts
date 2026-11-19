@@ -68,7 +68,8 @@ export async function checkPhone(): Promise<PhoneCheck> {
       : state.type === Network.NetworkStateType.WIFI ? 'wifi'
         : state.type === Network.NetworkStateType.NONE || state.isConnected === false ? 'none'
           : 'other'
-  const network: NetworkCheck = { type, sims: sims.map((s) => ({ mcc: s.mcc, mnc: s.mnc, carrier: s.carrier })) }
+  // Each SIM's number too, where the SIM stores it: on a first sign-in the server checks the wallet's SIM is in this phone.
+  const network: NetworkCheck = { type, sims: sims.map((s) => ({ mcc: s.mcc, mnc: s.mnc, carrier: s.carrier, number: s.number })) }
   if (simulated) network.simulated = true
   const econet = sims.find(isEconetSim)
   const econetNumber = econet?.number ? econet.number.replace(/\D/g, '').replace(/^266/, '').slice(-8) : null

@@ -17,6 +17,9 @@ import {
   type OnboardingNext,
   type OnboardingOtpSent,
   type OnboardingStart,
+  type SimCheck,
+  SMS_CODE_PREFIX,
+  TERMS_VERSION,
 } from '../../../shared/api'
 import type { Ctx } from '../context'
 import type { Queryable } from '../db/index'
@@ -24,6 +27,8 @@ import { AppError, notFound, validation } from '../errors'
 import type { IdRecord } from '../gateways/homeaffairs'
 import { hashToken, newId, newToken, randomDigits } from '../lib/crypto'
 import { iso, isoOrNull } from '../lib/time'
+import { checkSetupHold } from './simSwap'
+import { summarize } from './deviceContext'
 import { normalizeMsisdn } from '../lib/msisdn'
 import { deviceSecurity } from './maintenance'
 import { setEcoSurePin } from './pins'
@@ -59,7 +64,9 @@ export async function checkDeviceAllowed(q: Queryable, device: DeviceInfo): Prom
 }
 export const zNetwork = z.object({
   type: z.enum(['cellular', 'wifi', 'none', 'other']),
-  sims: z.array(z.object({ mcc: z.string().max(3).nullable(), mnc: z.string().max(3).nullable(), carrier: z.string().max(60).nullable() })).max(4),
+  sims: z.array(z.object({
+    mcc: z.string().max(3).nullable(), mnc: z.string().max(3).nullable(), carrier: z.string().max(60).nullable(), number: z.string().max(20).nullable().optional(),
+  })).max(4),
   simulated: z.boolean().optional(),
 })
 
@@ -84,6 +91,31 @@ export function checkEconet(ctx: Ctx, network: NetworkCheck, app: AppKind = 'cus
   }
 }
 
+/**
+ * First sign-in on a phone: is the wallet's SIM in it? Econet's verified number for the connection is the proof (when
+ * connected); otherwise the numbers the phone's SIMs report (Android, when the SIM stores it). A clearly different
+ * number is refused when the portal requires a match (App settings), else recorded as a mismatch.
+ */
+export async function checkSimInPhone(ctx: Ctx, msisdn: string, network: NetworkCheck, verifiedNumber: string | null): Promise<SimCheck> {
+  if (network.simulated && ctx.config.allowSimulatedNetwork) return 'simulated'
+  const policy = await deviceSecurity(ctx.db)
+  const other = (): SimCheck => {
+    if (!policy.requireSimMatch) return 'mismatch'
+    throw new AppError('SIM_NOT_IN_PHONE', `The SIM card in this phone isn't the one for ${maskMsisdn(msisdn)}. Put that SIM in this phone to set up EcoCash`)
+  }
+  if (verifiedNumber) return verifiedNumber === msisdn ? 'network' : other()
+  const numbers = network.sims.flatMap((s) => {
+    if (!s.number) return []
+    try {
+      return [normalizeMsisdn(s.number)]
+    } catch {
+      return []
+    }
+  })
+  if (numbers.length) return numbers.includes(msisdn) ? 'sim' : other()
+  return network.sims.some((s) => s.mcc === ECONET_SIM.mcc && s.mnc === ECONET_SIM.mnc) ? 'econet_sim' : 'unknown'
+}
+
 interface OnboardingRow {
   id: string
   user_id: string
@@ -101,14 +133,38 @@ interface OnboardingRow {
   otp_expires_at: Date | null
   otp_tries: number
   expires_at: Date
+  sim_check: SimCheck | null
 }
 
-export async function startOnboarding(ctx: Ctx, user: UserRow, app: AppKind, device: DeviceInfo, network: NetworkCheck): Promise<OnboardingStart> {
-  checkEconet(ctx, network, app)
+/**
+ * Travelling abroad (Me › Notifications › codes by email, on with the PIN, until a date): the phone is set up off
+ * Econet's network (roaming or Wi-Fi) and the code goes to the confirmed email instead of by SMS. The ID check, the
+ * SIM-swap hold and the new-phone cash-out rule still apply.
+ */
+export async function codesByEmail(q: Queryable, userId: string): Promise<string | null> {
+  const [u] = await q.query<{ email: string | null }>(
+    'SELECT email FROM users WHERE id = $1 AND codes_by_email_until > now() AND email_verified_at IS NOT NULL',
+    [userId],
+  )
+  return u?.email ?? null
+}
+
+/** "le••••@gmail.com" */
+const maskEmail = (e: string) => {
+  const [name, domain] = e.split('@')
+  return `${name.slice(0, 2)}${'•'.repeat(Math.max(2, Math.min(6, name.length - 2)))}@${domain}`
+}
+
+export async function startOnboarding(ctx: Ctx, user: UserRow, app: AppKind, device: DeviceInfo, network: NetworkCheck, verifiedNumber: string | null = null): Promise<OnboardingStart> {
+  const travelling = !!(await codesByEmail(ctx.db, user.id))
+  if (!travelling) checkEconet(ctx, network, app)
+  const simCheck: SimCheck = travelling ? 'travel' : await checkSimInPhone(ctx, user.msisdn ?? '', network, verifiedNumber)
+  // A new phone right after a SIM swap is how SIM-swap fraud takes a wallet over: refused until staff check the owner.
+  await checkSetupHold(ctx, user)
   const id = newId()
   const [row] = await ctx.db.query<{ expires_at: Date }>(
-    `INSERT INTO onboarding (id, user_id, app, device, network, expires_at) VALUES ($1, $2, $3, $4, $5, now() + make_interval(mins => $6)) RETURNING expires_at`,
-    [id, user.id, app, JSON.stringify(device), JSON.stringify(network), ONBOARDING_MINUTES],
+    `INSERT INTO onboarding (id, user_id, app, device, network, sim_check, expires_at) VALUES ($1, $2, $3, $4, $5, $6, now() + make_interval(mins => $7)) RETURNING expires_at`,
+    [id, user.id, app, JSON.stringify(device), JSON.stringify(network), simCheck, ONBOARDING_MINUTES],
   )
   return { id, msisdn: maskMsisdn(user.msisdn ?? ''), expiresAt: iso(row.expires_at) }
 }
@@ -127,6 +183,8 @@ export async function startProfile(ctx: Ctx, msisdnRaw: string, device: DeviceIn
   if (!user) throw new AppError('NOT_REGISTERED', `${msisdn} has no EcoCash account yet. EcoSure profiles for other numbers are coming soon`)
   if (user.status === 'suspended') throw new AppError('SUSPENDED', 'This account is suspended. Please contact EcoCash')
   await checkDeviceAllowed(ctx.db, device)
+  await checkSetupHold(ctx, user)
+  const simCheck = await checkSimInPhone(ctx, msisdn, network, null)
   const [{ n }] = await ctx.db.query<{ n: number }>(
     `SELECT count(*)::int AS n FROM onboarding WHERE user_id = $1 AND purpose = 'profile' AND created_at > now() - interval '1 hour'`,
     [user.id],
@@ -134,9 +192,9 @@ export async function startProfile(ctx: Ctx, msisdnRaw: string, device: DeviceIn
   if (n >= PROFILE_STARTS_PER_HOUR) throw new AppError('LIMIT_EXCEEDED', 'Too many tries for this number. Try again in an hour')
   const id = newId()
   const [row] = await ctx.db.query<OnboardingRow>(
-    `INSERT INTO onboarding (id, user_id, app, purpose, device, network, step, expires_at)
-     VALUES ($1, $2, 'ecosure', 'profile', $3, $4, 'otp', now() + make_interval(mins => $5)) RETURNING *`,
-    [id, user.id, JSON.stringify(device), JSON.stringify(network), ONBOARDING_MINUTES],
+    `INSERT INTO onboarding (id, user_id, app, purpose, device, network, sim_check, step, expires_at)
+     VALUES ($1, $2, 'ecosure', 'profile', $3, $4, $5, 'otp', now() + make_interval(mins => $6)) RETURNING *`,
+    [id, user.id, JSON.stringify(device), JSON.stringify(network), simCheck, ONBOARDING_MINUTES],
   )
   const sent = await sendOtp(ctx, row)
   return { onboarding: { id, msisdn: maskMsisdn(msisdn), expiresAt: iso(row.expires_at) }, sent }
@@ -202,7 +260,29 @@ async function sendOtp(ctx: Ctx, o: OnboardingRow): Promise<OnboardingOtpSent> {
     [o.id, hashToken(`${o.id}:${code}`), OTP_TTL_SECONDS],
   )
   const [u] = await ctx.db.query<{ msisdn: string }>('SELECT msisdn FROM users WHERE id = $1', [o.user_id])
-  const text = `${APP_NAMES[o.app]}: your code is ${code}. It sets up ${APP_NAMES[o.app]} on ${o.device.model}. Never share it, not even with EcoCash staff.`
+  const email = o.purpose === 'login' ? await codesByEmail(ctx.db, o.user_id) : null
+  if (email) {
+    const subject = `Your ${APP_NAMES[o.app]} code`
+    const body = `Your ${APP_NAMES[o.app]} code is ${code}. It sets up ${APP_NAMES[o.app]} on ${o.device.model} and expires in ${OTP_TTL_SECONDS / 60} minutes. You get codes by email because you said you are travelling. Never share it, not even with EcoCash staff. If you didn't ask for it, call EcoCash customer care.`
+    try {
+      await ctx.notifier.email.send(email, subject, body)
+    } catch (err) {
+      ctx.log.warn({ err: (err as Error).message }, 'otp email failed')
+      throw new AppError('UNKNOWN', "We couldn't send the email. Try again in a moment")
+    }
+    const mockEmail = !ctx.notifier.email.real
+    await ctx.db.query(
+      `INSERT INTO notifications (id, user_id, channel, category, recipient, title, body, status) VALUES ($1, $2, 'email', 'security', $3, $4, $5, $6)`,
+      [newId(), o.user_id, email, subject, mockEmail ? body : body.replace(code, '••••••'), mockEmail ? 'mock' : 'sent'],
+    )
+    const viaEmail: OnboardingOtpSent = { sentTo: maskEmail(email), channel: 'email', resendAfter: OTP_RESEND_SECONDS }
+    if (mockEmail) viaEmail.devCode = code
+    return viaEmail
+  }
+  // "<#>" first and the app's hash on the last line let Android hand the code to the app without SMS access
+  // (SMS Retriever, DFS guidelines 3.2.5b-iv). Without a hash configured the SMS is the same, minus that line.
+  const hash = ctx.config.smsAppHashes[o.app]
+  const text = `${SMS_CODE_PREFIX} ${APP_NAMES[o.app]}: your code is ${code}. It sets up ${APP_NAMES[o.app]} on ${o.device.model}. Never share it, not even with EcoCash staff.${hash ? `\n${hash}` : ''}`
   try {
     await ctx.notifier.sms.send(u.msisdn, text)
   } catch (err) {
@@ -214,7 +294,7 @@ async function sendOtp(ctx: Ctx, o: OnboardingRow): Promise<OnboardingOtpSent> {
     `INSERT INTO notifications (id, user_id, channel, category, recipient, title, body, status) VALUES ($1, $2, 'sms', 'security', $3, 'Sign-up code', $4, $5)`,
     [newId(), o.user_id, u.msisdn, mock ? text : text.replace(code, '••••••'), mock ? 'mock' : 'sent'],
   )
-  const sent: OnboardingOtpSent = { sentTo: maskMsisdn(u.msisdn), resendAfter: OTP_RESEND_SECONDS }
+  const sent: OnboardingOtpSent = { sentTo: maskMsisdn(u.msisdn), channel: 'sms', resendAfter: OTP_RESEND_SECONDS }
   if (mock) sent.devCode = code
   return sent
 }
@@ -223,19 +303,21 @@ async function sendOtp(ctx: Ctx, o: OnboardingRow): Promise<OnboardingOtpSent> {
  * Step 4: the OTP. Binds the wallet to this phone (the previous phone is signed out) and signs in. Creating an EcoSure
  * profile, the code is the first step: the ID check is next.
  */
-export async function verify(ctx: Ctx, id: string, otp: string): Promise<LoginResponse | OnboardingNext> {
+export async function verify(ctx: Ctx, id: string, otp: string, acceptTerms = false): Promise<LoginResponse | OnboardingNext> {
   const o = await requireOnboarding(ctx.db, id, 'otp')
+  // Explicit consent before the app is registered on this phone (DFS guidelines 3.2.5): checked before the code is used.
+  if (o.purpose === 'login' && !acceptTerms) throw new AppError('TERMS_REQUIRED', 'Accept the terms of use and privacy notice to continue')
   if (!o.otp_expires_at || new Date(o.otp_expires_at).getTime() < Date.now()) throw validation('The code has expired. Ask for a new one')
   if (o.otp_tries >= MAX_OTP_TRIES) throw validation('Too many wrong codes. Ask for a new one')
   if (o.otp_hash !== hashToken(`${o.id}:${otp.trim()}`)) {
     await ctx.db.query('UPDATE onboarding SET otp_tries = otp_tries + 1 WHERE id = $1', [id])
-    throw validation('That code is not right. Check the SMS and try again')
+    throw validation('That code is not right. Check it and try again')
   }
   if (o.purpose === 'profile') {
     await ctx.db.query(`UPDATE onboarding SET step = 'identity' WHERE id = $1 AND step = 'otp'`, [id])
     return { next: 'identity' }
   }
-  return finish(ctx, o)
+  return finish(ctx, o, true)
 }
 
 /** Creating an EcoSure profile, last step: the person's own EcoSure PIN. Then this phone is bound and they're in. */
@@ -246,10 +328,11 @@ export async function setPin(ctx: Ctx, id: string, pin: string): Promise<LoginRe
 }
 
 /** Binds the account to this phone for the app (the previous phone is signed out) and signs in. */
-async function finish(ctx: Ctx, o: OnboardingRow): Promise<LoginResponse> {
+async function finish(ctx: Ctx, o: OnboardingRow, acceptedTerms = false): Promise<LoginResponse> {
   const id = o.id
   const token = newToken()
   const { user, previous } = await ctx.db.tx(async (q) => {
+    if (acceptedTerms) await q.query('UPDATE users SET terms_accepted_at = now(), terms_version = $2 WHERE id = $1', [o.user_id, TERMS_VERSION])
     const done = await q.query(`UPDATE onboarding SET step = 'done' WHERE id = $1 AND step = $2 RETURNING id`, [id, o.step])
     if (!done.length) throw new AppError('CONFLICT', 'This sign-up was already finished')
     const previous = await q.query<{ id: string; model: string }>(
@@ -264,8 +347,9 @@ async function finish(ctx: Ctx, o: OnboardingRow): Promise<LoginResponse> {
     const deviceRow = newId()
     const d = o.device
     await q.query(
-      `INSERT INTO bound_devices (id, user_id, app, device_id, platform, model, os_version, app_version, last_seen_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now())`,
-      [deviceRow, o.user_id, o.app, d.deviceId, d.platform, d.model, d.osVersion, d.appVersion],
+      `INSERT INTO bound_devices (id, user_id, app, device_id, platform, model, os_version, app_version, sim_check, sims, last_seen_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, now())`,
+      [deviceRow, o.user_id, o.app, d.deviceId, d.platform, d.model, d.osVersion, d.appVersion, o.sim_check, JSON.stringify(o.network?.sims ?? [])],
     )
     const r = o.record!
     await q.query(
@@ -304,9 +388,11 @@ interface DeviceRow {
   last_seen_at: Date | null
   unbound_at: Date | null
   unbound_reason: BoundDevice['unboundReason'] | null
+  sim_check: SimCheck | null
+  profile: Record<string, unknown> | null
 }
 
-export async function listDevices(q: Queryable, userId: string, currentRowId?: string | null): Promise<BoundDevice[]> {
+export async function listDevices(q: Queryable, userId: string, currentRowId?: string | null, forStaff = false): Promise<BoundDevice[]> {
   const rows = await q.query<DeviceRow>('SELECT * FROM bound_devices WHERE user_id = $1 ORDER BY (unbound_at IS NULL) DESC, bound_at DESC LIMIT 50', [userId])
   return rows.map((r) => {
     const d: BoundDevice = {
@@ -315,6 +401,8 @@ export async function listDevices(q: Queryable, userId: string, currentRowId?: s
     }
     if (r.unbound_at) d.unboundAt = iso(r.unbound_at)
     if (r.unbound_reason) d.unboundReason = r.unbound_reason
+    if (r.sim_check) d.simCheck = r.sim_check
+    if (forStaff) d.profile = summarize(r.profile)
     if (currentRowId && r.id === currentRowId) d.current = true
     return d
   })
@@ -334,6 +422,7 @@ export async function unbind(ctx: Ctx, userId: string, rowId: string): Promise<v
       [rowId, userId],
     )
     if (r.length) await q.query('DELETE FROM sessions WHERE bound_device_id = $1', [rowId])
+    if (r.length) await q.query('UPDATE pay_biometric_keys SET revoked_at = now() WHERE bound_device_id = $1 AND revoked_at IS NULL', [rowId])
     return r.length > 0
   })
   if (!done) throw notFound('This phone is not bound to the wallet')

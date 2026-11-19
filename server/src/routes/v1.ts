@@ -16,7 +16,9 @@ import { customerWrote } from '../services/support'
 import { maseru } from '../assistant/tools'
 import type { Ctx } from '../context'
 import { AppError, notFound, validation } from '../errors'
-import { authUser, noContent, parse, requireRole, zAmount, zClientId, zId, zPin } from '../http'
+import { logAuthEvent } from '../services/authLog'
+import { assessAndLearn, contextFromHeaders, rememberRisk } from '../services/deviceContext'
+import { authUser, flagUnusualContext, noContent, parse, requireRole, UNUSUAL_CONTEXT_POINTS, zAmount, zClientId, zId, zPin } from '../http'
 import { hashToken, newToken } from '../lib/crypto'
 import { normalizeMsisdn } from '../lib/msisdn'
 import { startOfMaseruDay } from '../lib/time'
@@ -66,9 +68,16 @@ export async function v1Routes(app: FastifyInstance, ctx: Ctx) {
       ? await ctx.db.query<UserRow>(`SELECT * FROM users WHERE username = $1 AND kind = 'person'`, [username])
       : await ctx.db.query<UserRow>(`SELECT * FROM users WHERE msisdn = $1 AND kind = 'person'`, [msisdn])
     if (!user || !user.pin_hash) throw new AppError('NOT_REGISTERED', username ? `No one uses the username @${username}` : `${msisdn} is not registered for EcoCash`)
-    if (user.status === 'suspended') throw new AppError('SUSPENDED', 'This account is suspended. Please contact EcoCash')
+    if (user.status === 'suspended') {
+      await logAuthEvent(ctx.db, { userId: user.id, kind: 'login_failed', app: body.app, ip: req.ip, detail: 'suspended' })
+      throw new AppError('SUSPENDED', 'This account is suspended. Please contact EcoCash')
+    }
     // The EcoSure app signs in with the EcoSure PIN the person created (their EcoSure profile), never the EcoCash PIN.
-    await checkPin(ctx.db, user, body.pin, body.app === 'ecosure' ? 'ecosure' : 'wallet')
+    // Every refused sign-in is logged with its address, for the attack analysis (DFS guidelines 3.2.5b-vi).
+    await checkPin(ctx.db, user, body.pin, body.app === 'ecosure' ? 'ecosure' : 'wallet').catch(async (err: unknown) => {
+      await logAuthEvent(ctx.db, { userId: user.id, kind: 'login_failed', app: body.app, ip: req.ip, detail: err instanceof AppError ? err.code : 'error' })
+      throw err
+    })
     if (body.app === 'business' && user.role === 'customer') {
       throw new AppError('WRONG_APP', 'The business app is for EcoCash agents and merchants. Use the EcoCash Super App instead')
     }
@@ -84,15 +93,32 @@ export async function v1Routes(app: FastifyInstance, ctx: Ctx) {
       if (!body.device || !body.network) throw new AppError('VALIDATION', `Update ${APP_NAMES[body.app]} to sign in`)
       await checkDeviceAllowed(ctx.db, body.device)
       boundDeviceId = await boundDevice(ctx.db, user.id, body.app, body.device.deviceId)
+      // The same ID but another model or platform: a copied ID, not the bound phone. Set it up again (ID check, SMS).
+      if (boundDeviceId) {
+        const [b] = await ctx.db.query<{ model: string; platform: string }>('SELECT model, platform FROM bound_devices WHERE id = $1', [boundDeviceId])
+        if (b && (b.model !== body.device.model || b.platform !== body.device.platform)) {
+          await logAuthEvent(ctx.db, { userId: user.id, kind: 'device_mismatch', app: body.app, ip: req.ip, detail: `bound ${b.model} (${b.platform}), signing in as ${body.device.model} (${body.device.platform})` })
+          boundDeviceId = null
+        }
+      }
+      if (boundDeviceId) {
+        const context = contextFromHeaders(req.headers)
+        if (context) {
+          const risk = await assessAndLearn(ctx.db, boundDeviceId, context, req.ip)
+          rememberRisk(user.id, risk)
+          if (risk.points >= UNUSUAL_CONTEXT_POINTS) await flagUnusualContext(ctx, user.id, risk, body.app, req.ip)
+        }
+      }
       if (!boundDeviceId) {
         reply.code(202)
-        return { onboarding: await startOnboarding(ctx, user, body.app, body.device, body.network) }
+        return { onboarding: await startOnboarding(ctx, user, body.app, body.device, body.network, await ctx.numberVerify.numberFor({ headers: req.headers, ip: req.ip })) }
       }
     }
     const token = newToken()
     await ctx.db.query('INSERT INTO sessions (token_hash, user_id, app, bound_device_id) VALUES ($1, $2, $3, $4)', [hashToken(token), user.id, body.app, boundDeviceId])
     const [fresh] = await ctx.db.query<UserRow>('UPDATE users SET last_seen_at = now() WHERE id = $1 RETURNING *', [user.id])
     req.log.info({ userId: user.id, app: body.app }, 'login')
+    await logAuthEvent(ctx.db, { userId: user.id, kind: 'login', app: body.app, ip: req.ip })
     // Invites sent to this number become friend requests waiting for them.
     await claimInvites(ctx, fresh).catch((err) => req.log.warn({ err: (err as Error).message }, 'claim invites failed'))
     void ctx.notifier.send({
@@ -109,13 +135,18 @@ export async function v1Routes(app: FastifyInstance, ctx: Ctx) {
   app.post('/v1/auth/verify-pin', auth, async (req, reply) => {
     const body = parse(z.object({ pin: zPin }), req.body)
     await checkPin(ctx.db, req.user, body.pin, req.sessionApp === 'ecosure' ? 'ecosure' : 'wallet')
+    await logAuthEvent(ctx.db, { userId: req.user.id, kind: 'pin_ok', app: req.sessionApp, ip: req.ip, detail: 'payment check' })
     return noContent(reply)
   })
 
   // Opening the app (the lock screen): the app PIN when the person set one, else the wallet PIN.
   app.post('/v1/auth/unlock', auth, async (req, reply) => {
     const body = parse(z.object({ pin: zPin }), req.body)
-    await checkPin(ctx.db, req.user, body.pin, req.sessionApp === 'ecosure' ? 'ecosure' : req.user.app_pin_hash ? 'app' : 'wallet')
+    await checkPin(ctx.db, req.user, body.pin, req.sessionApp === 'ecosure' ? 'ecosure' : req.user.app_pin_hash ? 'app' : 'wallet').catch(async (err: unknown) => {
+      await logAuthEvent(ctx.db, { userId: req.user.id, kind: 'unlock_failed', app: req.sessionApp, ip: req.ip, detail: err instanceof AppError ? err.code : 'error' })
+      throw err
+    })
+    await logAuthEvent(ctx.db, { userId: req.user.id, kind: 'pin_ok', app: req.sessionApp, ip: req.ip, detail: 'unlock' })
     return noContent(reply)
   })
 
@@ -487,7 +518,7 @@ export async function v1Routes(app: FastifyInstance, ctx: Ctx) {
   // ---------- receive money: a person's own QR ----------
   app.get('/v1/payees/:id', auth, async (req) => {
     const { id } = parse(z.object({ id: zId }), req.params)
-    return paycodes.payee(ctx, id)
+    return paycodes.payee(ctx, id, req.user)
   })
 
   app.post('/v1/payments/person', auth, async (req) => {

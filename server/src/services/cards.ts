@@ -10,6 +10,7 @@ import { moneyResult } from './money'
 import { checkPin } from './pins'
 import { cardTopupFeeCents, getTariff } from './tariff'
 import type { UserRow } from './users'
+import { openText, sealText } from '../lib/vault'
 
 export const MAX_CARDS = 10
 export const TOPUP_TTL_MINUTES = 10
@@ -59,7 +60,7 @@ export async function addCard(ctx: Ctx, me: UserRow, body: AddCardBody): Promise
   const [row] = await ctx.db.query<CardRow>(
     `INSERT INTO cards (id, user_id, gateway_token, brand, last4, exp_month, exp_year, holder_name)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
-    [newId(), me.id, tok.token, tok.brand, tok.last4, body.expMonth, expYear, body.holderName.trim().replace(/\s+/g, ' ')],
+    [newId(), me.id, sealText(tok.token), tok.brand, tok.last4, body.expMonth, expYear, body.holderName.trim().replace(/\s+/g, ' ')],
   )
   return toCard(row)
 }
@@ -151,7 +152,7 @@ export async function startTopup(ctx: Ctx, me: UserRow, body: TopupBody): Promis
   // Checked before the gateway starts a charge, and again under the wallet lock below.
   checkDaily(await topupsToday(ctx.db, me.id), amountCents, dailyCents)
   const feeCents = cardTopupFeeCents(tariff, amountCents)
-  const charge = await ctx.cards.startCharge(card.gateway_token, amountCents + feeCents)
+  const charge = await ctx.cards.startCharge(openText(card.gateway_token), amountCents + feeCents)
 
   const row = await ctx.tx(async (q) => {
     // One top-up start at a time per wallet, so the daily limit cannot be raced.

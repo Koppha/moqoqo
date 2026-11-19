@@ -1,6 +1,10 @@
 package com.moqoqo.deviceintegrity
 
 import android.content.Context
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
+import android.net.wifi.WifiInfo
+import android.net.wifi.WifiManager
 import android.os.Build
 import android.provider.Settings
 import expo.modules.kotlin.modules.Module
@@ -26,6 +30,33 @@ class DeviceIntegrityModule : Module() {
         "rootSigns" to rootSigns(ctx),
         "emulator" to isEmulator(),
       )
+    }
+
+    /**
+     * On Wi-Fi: "open" when the network has no password (anyone nearby can join or imitate it), "secured" otherwise
+     * (OWE "enhanced open" is encrypted, so secured). null when not on Wi-Fi, before Android 12, or unknown.
+     */
+    Function("wifiSecurity") {
+      val ctx = appContext.reactContext ?: return@Function null
+      wifiSecurity(ctx)
+    }
+  }
+
+  private fun wifiSecurity(ctx: Context): String? {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return null
+    return try {
+      val cm = ctx.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+      val caps = cm.getNetworkCapabilities(cm.activeNetwork) ?: return null
+      if (!caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) return null
+      val info = (caps.transportInfo as? WifiInfo)
+        ?: @Suppress("DEPRECATION") (ctx.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager).connectionInfo
+      when (info.currentSecurityType) {
+        WifiInfo.SECURITY_TYPE_OPEN -> "open"
+        WifiInfo.SECURITY_TYPE_UNKNOWN -> null
+        else -> "secured"
+      }
+    } catch (e: Exception) {
+      null
     }
   }
 

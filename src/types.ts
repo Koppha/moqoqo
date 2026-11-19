@@ -63,6 +63,8 @@ export interface Chat {
   request?: boolean
   /** Groups: who made it (they can delete it; everyone else can leave). */
   createdBy?: string
+  /** Direct chats: I blocked this person (no messages, money or requests either way until I unblock). */
+  blockedByMe?: boolean
   unread: number
   updatedAt: string
   lastMessage?: Message

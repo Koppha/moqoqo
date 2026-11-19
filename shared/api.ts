@@ -25,9 +25,14 @@ export type ErrorCode =
   | 'NOT_ECONET' // setting up EcoCash Super App on a phone needs an Econet SIM on Econet mobile data (not Wi-Fi)
   | 'PROFILE_NEEDED' // the standalone EcoSure app: this number has no EcoSure profile (and PIN) yet
   | 'DEVICE_BLOCKED' // this phone is rooted or jailbroken, or in developer mode, and the portal blocks such phones
+  | 'SIM_SWAP_HOLD' // the number moved to a new SIM recently: no new phone setup until staff check the owner in person
+  | 'SIM_NOT_IN_PHONE' // first sign-in on a phone: its SIM (or Econet's network) shows a different number
+  | 'TERMS_REQUIRED' // setting up a phone: the customer must accept the terms of use first
+  | 'RATE_LIMITED' // too many attempts from this connection; try again shortly
   | 'ID_MISMATCH' // the ID details don't match Home Affairs, or this ID isn't the one on the wallet
   | 'KYC_REQUIRED' // needs a higher KYC tier (cash-out, ATM) or over the tier-1 limit: Me › Update KYC
   | 'RISK_BLOCKED' // stopped by a fraud rule (e.g. too many payments too fast); staff review it in the portal
+  | 'BLOCKED' // one of the two people blocked the other: no messages, money or requests between them one to one
   | 'UNAUTHORIZED'
   | 'FORBIDDEN'
   | 'NOT_FOUND'
@@ -142,7 +147,18 @@ export interface CreateGroupBody { title: string; memberIds: string[] }
 /** PUT /v1/me/privacy → Me */
 export interface PrivacyBody { messagePolicy: MessagePolicy }
 /** GET /v1/users/:id/relation → { user, relation }: the personal QR's preview. */
-export interface UserRelation { user: PublicUser; relation: FriendRelation }
+export interface UserRelation { user: PublicUser; relation: FriendRelation; blockedByMe?: boolean }
+
+// ---------- blocking (/v1/blocks) ----------
+/**
+ * A person blocks another person (customers only, not merchants or agents). While it stands, neither can message,
+ * send or request money, or send a friend request to the other one to one; their groups are unaffected. Blocking
+ * also ends a friendship and declines open friend requests and money requests between them. The blocked person is
+ * never told: they see "can't reach this person".
+ * GET /v1/blocks → BlockedUser[]. POST /v1/blocks { userId } → BlockedUser[]. DELETE /v1/blocks/:userId → BlockedUser[].
+ */
+export interface BlockedUser { user: PublicUser; since: string }
+export interface BlockBody { userId: string }
 export const INVITES_PER_DAY = 20
 export const GROUP_MAX_MEMBERS = 100
 
@@ -184,8 +200,43 @@ export interface DeviceInfo {
 export interface DeviceIntegrity { rooted: boolean; developerMode: boolean; emulator: boolean }
 
 /** Set by admins in the portal (Settings › Device security): which phones the apps refuse to run on. */
-export interface DeviceSecurity { blockRooted: boolean; blockDeveloperMode: boolean }
-export const DEFAULT_DEVICE_SECURITY: DeviceSecurity = { blockRooted: false, blockDeveloperMode: false }
+export interface DeviceSecurity {
+  blockRooted: boolean
+  blockDeveloperMode: boolean
+  /** First sign-in on a phone: refuse it when the phone's SIM (or Econet's network) shows a number other than the wallet's. */
+  requireSimMatch: boolean
+  /** Sign out after this many minutes without use (apps and portal). CBL/LCA DFS guidelines 3.2.8a: at most 15. */
+  idleMinutes: number
+  /** A session ends after this many days even when in use; the person signs in again. */
+  sessionDays: number
+  /** Wrong PINs (or staff passwords) in a row before that PIN or account is locked (guidelines 3.2.5b-v). */
+  maxPinAttempts: number
+  /** How long the lock lasts. */
+  pinLockMinutes: number
+}
+// Placeholders until ETL decides; rooted phones are blocked by default (guidelines 3.2.3a).
+export const DEFAULT_DEVICE_SECURITY: DeviceSecurity = {
+  blockRooted: true, blockDeveloperMode: false, requireSimMatch: true, idleMinutes: 15, sessionDays: 30, maxPinAttempts: 5, pinLockMinutes: 15,
+}
+export const SECURITY_LIMITS = { idleMinutes: [1, 15], sessionDays: [1, 90], maxPinAttempts: [3, 10], pinLockMinutes: [5, 1440] } as const
+
+/**
+ * How sure we are, at a phone's first sign-in, that the wallet's SIM is in that phone. network: Econet's network
+ * confirmed the number of the connection (header enrichment, to be connected). sim: the SIM in the phone reports the
+ * wallet's number. econet_sim: an Econet SIM is in the phone but doesn't say its number. unknown: the phone shows no
+ * SIMs (iPhone). mismatch: another number, let through because the portal doesn't require a match. simulated: a
+ * test build pretending to be on Econet.
+ */
+export type SimCheck = 'network' | 'sim' | 'econet_sim' | 'unknown' | 'mismatch' | 'simulated' | 'travel'
+export const SIM_CHECK_LABEL: Record<SimCheck, string> = {
+  network: 'Number confirmed by Econet',
+  sim: "Phone's SIM shows this number",
+  econet_sim: 'Econet SIM, number not shown',
+  unknown: "Phone doesn't show its SIM",
+  mismatch: 'SIM shows another number (allowed by settings)',
+  simulated: 'Test build (simulated)',
+  travel: 'Travelling: set up with an email code, SIM not checked',
+}
 
 /** Why this phone is blocked under the policy, or null. Without a report (an older app) a blocking policy blocks: update first. */
 export function deviceBlockReason(policy: DeviceSecurity, integrity: DeviceIntegrity | undefined): 'rooted' | 'developer' | 'unknown' | null {
@@ -200,7 +251,7 @@ export interface NetworkCheck {
   /** How the phone is connected right now. */
   type: 'cellular' | 'wifi' | 'none' | 'other'
   /** The SIMs the phone reports (Android; iPhones don't say). */
-  sims: { mcc: string | null; mnc: string | null; carrier: string | null }[]
+  sims: { mcc: string | null; mnc: string | null; carrier: string | null; number?: string | null }[]
   /** Test builds only: pretend to be on Econet (emulators have a test SIM). Refused unless the server allows it. */
   simulated?: boolean
 }
@@ -216,6 +267,8 @@ export interface OnboardingIdentity { fullName: string }
 export interface OnboardingConfirmBody { nameConfirmed: boolean; dob: string; gender: 'female' | 'male' }
 export interface OnboardingOtpSent {
   sentTo: string
+  /** Where the code went: SMS to the wallet's number, or email while the person is travelling (codes by email on). */
+  channel?: 'sms' | 'email'
   resendAfter: number
   /** Only while SMS is a mock (test servers): the code, since no SMS is really sent. */
   devCode?: string
@@ -248,7 +301,11 @@ export interface BoundDevice {
   lastSeenAt: string | null
   /** Set once another phone took over (or staff removed it). */
   unboundAt?: string
-  unboundReason?: 'replaced' | 'removed_by_staff'
+  unboundReason?: 'replaced' | 'removed_by_staff' | 'removed_by_user' | 'reported_lost'
+  /** At its first sign-in: how the wallet's SIM was matched to this phone. */
+  simCheck?: SimCheck
+  /** What this phone usually looks like (learned from its requests); staff only. */
+  profile?: DeviceProfileSummary
   /** The phone making this request. */
   current?: boolean
 }
@@ -282,6 +339,8 @@ export interface ChatSummary {
   request?: boolean
   /** Groups: who made it (only they can delete it; everyone else can leave). */
   createdBy?: string
+  /** Direct chats: the viewer blocked the other person (the blocked person is never told). */
+  blockedByMe?: boolean
 }
 
 export type BillKey = 'lec' | 'wasco' | 'school' | 'airtime' | 'burial'
@@ -542,6 +601,29 @@ export interface MerchantSummary {
   pending: Message[] // open merchant requests
   recent: Transaction[]
 }
+
+/**
+ * GET /v1/business/profile → BusinessProfile: the agent's or merchant's own account and its listing on the Places
+ * map. PUT /v1/business/profile (BusinessListingBody) → BusinessProfile adds or edits that listing. The business
+ * name, code and owner are set by EcoCash staff (KYC), so they are read-only here.
+ */
+export interface BusinessProfile {
+  name: string
+  /** The account holder (person) EcoCash registered the business to. */
+  holder: string
+  role: 'agent' | 'merchant'
+  code: string | null
+  msisdn: string
+  kycTier: 1 | 2
+  status: 'active' | 'suspended'
+  openedAt: string
+  /** People who linked this business in EcoCash Super App (Business mini app). */
+  linkedPeople: number
+  /** On the map (Places) so customers can find it; null when it isn't listed yet. */
+  listing: Place | null
+}
+/** A new listing needs the location (the phone's, taken at the shop); an edit keeps it unless sent. */
+export interface BusinessListingBody { address: string; hours?: string; phone?: string; lat?: number; lng?: number; listed: boolean }
 
 // ---------- receive money: QR, code or tap (merchant terminal) ----------
 
@@ -1317,6 +1399,20 @@ export const ASSISTANT_HOURLY_LIMIT = 30
 
 export type SupportTopic = 'payments' | 'account' | 'kyc' | 'ecosure' | 'cards_banks' | 'fraud' | 'other'
 export type TicketStatus = 'open' | 'waiting' | 'closed' // waiting = support answered, waiting for the customer
+/** urgent: fraud, money lost, SIM swap or account takeover — staff see these first. */
+export type TicketPriority = 'urgent' | 'normal'
+/** Where the receptionist met the person: in-app chat, talking to it in the app, the care phone line, a merchant's receptionist. */
+export type TicketChannel = 'chat' | 'app_voice' | 'phone' | 'merchant'
+/** Which support team picks up each kind of request. */
+export const SUPPORT_TEAM: Record<SupportTopic, string> = {
+  payments: 'Payments',
+  account: 'Accounts',
+  kyc: 'Accounts',
+  ecosure: 'EcoSure',
+  cards_banks: 'Payments',
+  fraud: 'Fraud and security',
+  other: 'Customer care',
+}
 export interface SupportTicket {
   id: string
   reference: string // SUP-000001
@@ -1330,6 +1426,8 @@ export interface SupportTicket {
   /** First reply from a person in support. */
   firstResponseAt: string | null
   assignedTo: string | null
+  priority: TicketPriority
+  channel: TicketChannel
 }
 export interface SupportTicketDetail extends SupportTicket {
   /** The EcoCash Support chat, oldest first. */
@@ -1393,7 +1491,16 @@ export interface NotificationSettings {
   emailVerified: boolean
   /** Push needs the phone's permission and a registered device; false until the app has registered one. */
   pushDevice: boolean
+  /**
+   * Travelling abroad: until this time, the 6-digit code for setting up a phone is emailed to the confirmed address
+   * instead of sent by SMS, and setting up works off Econet's network. Null = off (the default).
+   */
+  codesByEmailUntil: string | null
 }
+/** PUT /v1/me/codes-by-email → NotificationSettings. Turning on needs a confirmed email and the wallet PIN. */
+export interface CodesByEmailBody { on: boolean; days?: number; pin?: string }
+/** Longest a person can have codes go by email in one go; they can turn it on again. Placeholder until ETL decides. */
+export const CODES_BY_EMAIL_MAX_DAYS = 90
 /** PUT /v1/me/notifications → NotificationSettings. Only the given switches change; security can't be switched off. */
 export interface UpdateNotificationsBody { prefs: Partial<NotificationPrefs> }
 /** POST /v1/me/email: set (or change) the email address and send it a 6-digit code → NotificationSettings */
@@ -2036,7 +2143,7 @@ export interface Performance {
 // Rules run on every payment (in the ledger). "block" stops the payment (403 RISK_BLOCKED); "flag" lets it through
 // and opens an alert. Thresholds are set in the portal. A real-time ML/enterprise engine can feed the same alerts later.
 
-export type RiskRuleKey = 'velocity' | 'new_device_cashout' | 'many_senders' | 'unusual_amount' | 'night_cashout'
+export type RiskRuleKey = 'velocity' | 'new_device_cashout' | 'many_senders' | 'unusual_amount' | 'night_cashout' | 'sim_swap'
 export interface RiskRule {
   key: RiskRuleKey
   enabled: boolean
@@ -2050,12 +2157,28 @@ export const RISK_RULE_INFO: Record<RiskRuleKey, { title: string; detail: string
   many_senders: { title: 'Many people paying one wallet', detail: 'One wallet receives from {senders} or more different people within {minutes} minutes (possible mule account).' },
   unusual_amount: { title: 'Unusually large payment', detail: 'A payment over M{amount} and more than {times}× the wallet\'s average payment of the last 30 days.' },
   night_cashout: { title: 'Large cash-out at night', detail: 'Cash-out, ATM or bank payment over M{amount} between {from}:00 and {to}:00 (Maseru).' },
+  sim_swap: {
+    title: 'Recent SIM swap',
+    detail: 'Within {hours} hours of the number moving to a new SIM: cash-outs, ATM, bank, abroad and other-network payments, and any payment over M{amount}. Setting up a new phone is refused for {setupHours} hours. Staff lift it after checking the owner in person.',
+  },
+}
+/** Transaction surveillance (anti-money-laundering) scenarios, run every few minutes over recent payments. */
+export type SurveillanceKey = 'structuring' | 'pass_through' | 'dormant_reactivation'
+/** What raised an alert: a fixed rule, the behavioural risk score, or a surveillance scenario. */
+export type RiskAlertRule = RiskRuleKey | 'behaviour_score' | SurveillanceKey | 'auth_anomaly'
+export const RISK_ALERT_TITLE: Record<RiskAlertRule, string> = {
+  ...(Object.fromEntries(Object.entries(RISK_RULE_INFO).map(([k, v]) => [k, v.title])) as Record<RiskRuleKey, string>),
+  behaviour_score: 'Unusual behaviour (risk score)',
+  structuring: 'Possible structuring',
+  pass_through: 'Money passing straight through',
+  dormant_reactivation: 'Dormant wallet suddenly active',
+  auth_anomaly: 'Unusual sign-in activity',
 }
 export type RiskAlertStatus = 'open' | 'fraud' | 'ok'
 export interface RiskAlert {
   id: string
   user: PublicUser
-  rule: RiskRuleKey
+  rule: RiskAlertRule
   action: 'flagged' | 'blocked'
   severity: 'low' | 'medium' | 'high'
   detail: string
@@ -2064,10 +2187,240 @@ export interface RiskAlert {
   status: RiskAlertStatus
   reviewedBy: string | null
   createdAt: string
+  /** Behavioural risk score 0–100 of the payment, when it was scored. */
+  score: number | null
+  /** The AI decision behind the alert (its reasons are in the decision log). */
+  decisionId: string | null
+  /** The financial crime case the alert belongs to. */
+  caseId: string | null
+  caseRef: string | null
 }
 /** GET /admin/v1/risk/alerts?status=&severity=&action=&page= → Page<RiskAlert> with counts status:*, severity:* and action:*. POST /admin/v1/risk/alerts/:id/review { status, suspend? } → RiskAlert. */
 export interface RiskReviewBody { status: 'fraud' | 'ok'; suspend?: boolean }
 /** GET /admin/v1/risk/rules → RiskRule[]. PUT /admin/v1/risk/rules RiskRule[] → RiskRule[]. */
+
+// ---------- behavioural risk score (explainable) ----------
+//
+// Every payment by a person gets a score from 0 to 100: the sum of points from the features below, each with a
+// plain reason. No black box: staff see exactly why a payment scored what it did (AI governance › Decisions).
+
+export type ScoreFeature =
+  | 'amount_vs_usual' | 'thin_history' | 'new_recipient' | 'new_account' | 'new_device' | 'cash_out'
+  | 'unusual_hour' | 'velocity' | 'drains_balance' | 'risky_recipient' | 'sim_swap' | 'unusual_context'
+export const SCORE_FEATURE_INFO: Record<ScoreFeature, { title: string; max: number }> = {
+  amount_vs_usual: { title: 'Much larger than their usual payment', max: 30 },
+  thin_history: { title: 'Large payment with little history', max: 10 },
+  new_recipient: { title: 'First payment to this person', max: 10 },
+  new_account: { title: 'New wallet', max: 15 },
+  new_device: { title: 'New phone set up recently', max: 35 },
+  cash_out: { title: 'Money leaving EcoCash (cash-out, ATM, bank)', max: 10 },
+  unusual_hour: { title: 'At an hour they never pay', max: 10 },
+  velocity: { title: 'Many payments in the last hour', max: 25 },
+  drains_balance: { title: 'Empties the wallet', max: 15 },
+  risky_recipient: { title: 'Receiver linked to fraud alerts', max: 30 },
+  sim_swap: { title: 'Number moved to a new SIM recently', max: 40 },
+  unusual_context: { title: 'Phone or place unlike the bound phone’s usual', max: 40 },
+}
+/** A reason behind a decision: a score feature (with its points) or a surveillance scenario (0 points). */
+export interface ScoreReason { feature: ScoreFeature | SurveillanceKey; points: number; detail: string }
+
+// ---------- AI governance and model risk management (portal: AI governance) ----------
+//
+// Every automated model is registered with what it decides, the data it uses, its limits and who oversees it.
+// Each change makes a new version (who, when, why). "shadow" scores and logs without acting, to test a change
+// safely; "active" acts. Every decision is logged with its reasons and joined to the human review outcome, which
+// measures how often each model is right.
+
+export type AiModelKey = 'fraud_score' | 'aml_surveillance' | 'case_summary' | 'assistant'
+export type AiModelMode = 'off' | 'shadow' | 'active'
+export type AiOutcome = 'allow' | 'flag' | 'block' | 'info'
+export interface AiParamInfo { label: string; hint?: string; min: number; max: number; step?: number }
+export interface AiModelInfo {
+  title: string
+  kind: 'scoring' | 'rules' | 'llm'
+  purpose: string
+  /** What the model is allowed to decide on its own. */
+  decides: string
+  humanOversight: string
+  dataUsed: string
+  limitations: string
+  /** Modes staff may choose; empty: not configurable here. */
+  modes: AiModelMode[]
+  params: Record<string, AiParamInfo>
+}
+export const AI_MODEL_INFO: Record<AiModelKey, AiModelInfo> = {
+  fraud_score: {
+    title: 'Behavioural fraud score',
+    kind: 'scoring',
+    purpose: 'Scores every payment 0–100 against the payer\'s own usual behaviour, to catch account takeover, scams and mule activity as it happens.',
+    decides: 'Flags payments at or above "Flag at". Blocks at or above "Block at" only when that is set above 0.',
+    humanOversight: 'Every flag or block opens an alert that staff review as fraud or fine; high scores open a case. The customer can call customer care about a blocked payment.',
+    dataUsed: 'The payer\'s payments of the last 90 days, wallet age, balance, phone changes, and fraud alerts on the receiver. No personal details beyond the wallet.',
+    limitations: 'Points-based, so it is fully explainable but simpler than a trained model. New wallets have little history, so their scores lean on fewer features. Thresholds are placeholders until ETL sets them.',
+    modes: ['off', 'shadow', 'active'],
+    params: {
+      flagAt: { label: 'Flag at score', hint: 'Payments scoring this or more are let through and flagged.', min: 1, max: 100 },
+      blockAt: { label: 'Block at score', hint: '0 = never block on the score alone.', min: 0, max: 100 },
+      caseAt: { label: 'Open a case at score', hint: 'Payments scoring this or more open (or join) a case.', min: 1, max: 100 },
+    },
+  },
+  aml_surveillance: {
+    title: 'Transaction surveillance (AML)',
+    kind: 'rules',
+    purpose: 'Looks across recent payments every few minutes for money-laundering patterns that no single payment shows.',
+    decides: 'Raises alerts only; never stops a payment.',
+    humanOversight: 'Every alert is reviewed by staff, and a case is opened for each wallet so a suspicious transaction report can be filed with the FIU.',
+    dataUsed: 'Payments of the last 24 hours to 180 days.',
+    limitations: 'Fixed scenarios with placeholder thresholds until ETL compliance confirms them.',
+    modes: ['off', 'shadow', 'active'],
+    params: {
+      structuringAmount: { label: 'Structuring: reporting amount (M)', hint: 'Payments just under this amount are watched.', min: 100, max: 100000 },
+      structuringCount: { label: 'Structuring: payments in 24 h', min: 2, max: 50 },
+      passThroughMin: { label: 'Pass-through: money in over 24 h (M)', min: 100, max: 100000 },
+      passThroughPercent: { label: 'Pass-through: % sent on', min: 10, max: 100 },
+      dormantDays: { label: 'Dormant: days with no payments', min: 7, max: 720 },
+      dormantAmount: { label: 'Dormant: then pays out (M)', min: 100, max: 100000 },
+    },
+  },
+  case_summary: {
+    title: 'Case summary (Claude)',
+    kind: 'llm',
+    purpose: 'Writes a neutral first summary of a financial crime case for the investigator: what happened, red flags, and what to check next.',
+    decides: 'Nothing. It only writes a draft for staff; staff decide the outcome.',
+    humanOversight: 'Only made when a staff member asks, shown labelled as AI-written, and kept in the case history.',
+    dataUsed: 'The case\'s alerts and payments, pseudonymised: no names, phone numbers or IDs are sent to the model.',
+    limitations: 'Can misread patterns or miss context. Never use it as the reason for an outcome without checking the payments.',
+    modes: ['off', 'active'],
+    params: {},
+  },
+  assistant: {
+    title: 'EcoCash Assistant (Claude)',
+    kind: 'llm',
+    purpose: 'Answers customers in their assistant chat and gets payments ready for them.',
+    decides: 'Nothing about money: it only prepares cards that open the app\'s own screens, where the customer confirms with their PIN.',
+    humanOversight: 'Hands over to a person in EcoCash Support when asked, when money seems lost or taken, or when it can\'t help. Conversations handed over are in Help & support.',
+    dataUsed: 'The customer\'s own wallet, payments, requests and EcoSure cover, read through tools during the chat.',
+    limitations: 'Can be wrong about how features work. It is switched on by the server\'s Claude key, not from here.',
+    modes: [],
+    params: {},
+  },
+}
+export interface AiModelStats {
+  /** Last 30 days. */
+  decisions: number
+  byOutcome: Record<AiOutcome, number>
+  /** Of its alerts reviewed by staff: confirmed fraud vs. found fine. */
+  confirmedFraud: number
+  falsePositives: number
+  /** confirmedFraud / reviewed; null until something was reviewed. */
+  precision: number | null
+  /** Scores in buckets of 10 (0–9 … 90–100); empty for models without a score. */
+  scoreBuckets: number[]
+  /** Average score in the last 7 days and in the 3 weeks before (a shift suggests drift). */
+  avgScore: { lastWeek: number | null; before: number | null }
+}
+export interface AiModel {
+  key: AiModelKey
+  version: number
+  mode: AiModelMode
+  params: Record<string, number>
+  changedBy: string | null
+  changedAt: string | null
+  note: string | null
+  /** e.g. "In-house, explainable" or "Anthropic claude-opus-5-5". */
+  provider: string
+  /** False when the model can't run (no Claude key on the server). */
+  available: boolean
+  stats: AiModelStats
+}
+export interface AiModelVersion { version: number; mode: AiModelMode; params: Record<string, number>; changedBy: string | null; changedAt: string; note: string | null }
+/** PUT /admin/v1/ai/models/:key → AiModel (a new version). GET /admin/v1/ai/models → AiModel[]. GET /admin/v1/ai/models/:key/versions → AiModelVersion[]. */
+export interface AiModelBody { mode: AiModelMode; params: Record<string, number>; note: string }
+export interface AiDecision {
+  id: string
+  model: AiModelKey
+  version: number
+  /** Logged in shadow mode: it did not act. */
+  shadow: boolean
+  user: PublicUser | null
+  score: number | null
+  outcome: AiOutcome
+  reasons: ScoreReason[]
+  summary: string
+  amount: number | null
+  kind: string | null
+  transactionRef: string | null
+  /** What staff found when they reviewed the alert or case; null until then. */
+  review: 'fraud' | 'ok' | null
+  createdAt: string
+}
+/** GET /admin/v1/ai/decisions?model=&outcome=&page= → Page<AiDecision> with counts model:* and outcome:*. */
+
+// ---------- financial crime case management (portal: Cases) ----------
+//
+// Alerts about one wallet are gathered in one case. High-severity alerts, blocks, high scores and surveillance
+// alerts open a case on their own; staff can also open one. Staff assign, investigate, freeze the wallet,
+// close it as fraud or fine (which reviews every alert in it), and file a suspicious transaction report (STR).
+
+export type CaseStatus = 'open' | 'investigating' | 'escalated' | 'closed_fraud' | 'closed_ok'
+export const CASE_STATUS_LABEL: Record<CaseStatus, string> = {
+  open: 'New', investigating: 'Investigating', escalated: 'Escalated', closed_fraud: 'Closed: fraud', closed_ok: 'Closed: fine',
+}
+export type CasePriority = 'high' | 'medium' | 'low'
+export interface FraudCase {
+  id: string
+  /** e.g. CASE-000123. */
+  ref: string
+  user: PublicUser
+  status: CaseStatus
+  priority: CasePriority
+  title: string
+  assignedTo: string | null
+  alertCount: number
+  openAlerts: number
+  /** Money in the case's alerts. */
+  amount: number
+  frozen: boolean
+  strRef: string | null
+  strFiledAt: string | null
+  createdAt: string
+  updatedAt: string
+  closedAt: string | null
+}
+export type CaseEventKind = 'created' | 'alert' | 'note' | 'status' | 'assign' | 'freeze' | 'unfreeze' | 'summary' | 'str' | 'closed'
+export interface CaseEvent { id: string; actor: string; kind: CaseEventKind; text: string; createdAt: string }
+export interface CaseTransaction {
+  reference: string
+  kind: string
+  direction: 'in' | 'out'
+  amount: number
+  counterparty: string | null
+  createdAt: string
+  /** An alert in this case points at it. */
+  flagged: boolean
+}
+export interface FraudCaseDetail extends FraudCase {
+  alerts: RiskAlert[]
+  events: CaseEvent[]
+  /** The wallet's payments of the last 30 days, newest first (at most 200). */
+  transactions: CaseTransaction[]
+  wallet: { status: UserStatus; balance: number; kycTier: 1 | 2; createdAt: string; phones: number }
+  /** The latest AI-written summary, if one was asked for. */
+  summary: { text: string; createdAt: string; by: string } | null
+}
+export interface CaseStats { open: number; investigating: number; escalated: number; unassigned: number; closedLast30: number; avgDaysToClose: number | null }
+/**
+ * GET /admin/v1/cases?status=&priority=&mine=&page= → Page<FraudCase> with counts status:* and priority:*.
+ * status may also be "active" (every status not closed). GET /admin/v1/cases/stats → CaseStats.
+ * POST /admin/v1/cases CaseOpenBody → FraudCaseDetail. GET /admin/v1/cases/:id → FraudCaseDetail.
+ * PATCH /admin/v1/cases/:id CaseUpdateBody · POST …/close CaseCloseBody · POST …/freeze CaseFreezeBody ·
+ * POST …/summary (AI) · POST …/str CaseStrBody → FraudCaseDetail.
+ */
+export interface CaseOpenBody { msisdn: string; title: string; note: string }
+export interface CaseUpdateBody { status?: 'open' | 'investigating' | 'escalated'; assignedTo?: string | null; note?: string }
+export interface CaseCloseBody { outcome: 'fraud' | 'ok'; note: string }
+export interface CaseFreezeBody { frozen: boolean; note: string }
+export interface CaseStrBody { reference: string }
 
 /** sent: handed to the provider. mock: no provider plugged in yet, recorded here only. failed: the provider refused it. */
 export type NotificationStatus = 'sent' | 'mock' | 'failed'
@@ -2362,4 +2715,168 @@ export function nextStopOrderDate(frequency: StopOrderFrequency, day: number, fr
   const inMonth = (y: number, m: number) => (day === 0 ? new Date(Date.UTC(y, m + 1, 0)) : new Date(Date.UTC(y, m, day)))
   const here = inMonth(d.getUTCFullYear(), d.getUTCMonth())
   return ymd(here >= d ? here : inMonth(d.getUTCFullYear(), d.getUTCMonth() + 1))
+}
+
+// ---------- SIM swap (/admin/v1/users/:id/sim-swaps, POST /v1/hooks/sim-swap) ----------
+// Econet reports when a number moves to a new SIM. For a while after (the sim_swap risk rule's hours), money leaving
+// EcoCash and large payments are stopped, and setting up the wallet on a new phone is refused, until staff check the
+// owner in person ("clear"). The owner's bound phone gets a security alert. Until Econet is connected, staff simulate
+// swaps in the portal.
+
+export interface SimSwapEvent {
+  id: string
+  swappedAt: string
+  /** network = Econet; simulated = the portal (test); device = the bound phone saw its EcoCash SIM replaced or taken out. */
+  source: 'network' | 'simulated' | 'device'
+  receivedAt: string
+  clearedAt: string | null
+  /** Staff email, or 'phone' when the same SIM card came back. */
+  clearedBy: string | null
+  note: string | null
+  /** What the phone saw (device rows). */
+  detail?: string | null
+}
+/** GET /admin/v1/users/:id/sim-swaps */
+export interface SimSwapStatus {
+  /** The latest swap, as the network reports it now. */
+  lastSwapAt: string | null
+  /** Payments are held (rule on, swap within its hours, not cleared). */
+  held: boolean
+  /** End of the payment hold, when held. */
+  heldUntil: string | null
+  /** New-phone setup is refused until this time (when in the future). */
+  setupBlockedUntil: string | null
+  /** Staff cleared the swaps up to this time. */
+  clearedAt: string | null
+  /** No real network source yet: the portal may simulate swaps. */
+  simulated: boolean
+  events: SimSwapEvent[]
+}
+/** POST /admin/v1/users/:id/sim-swaps/simulate (mock source only) */
+export interface SimSwapSimulateBody { hoursAgo?: number }
+/** POST /admin/v1/users/:id/sim-swaps/clear: staff checked the owner in person. */
+export interface SimSwapClearBody { note: string }
+/** POST /v1/hooks/sim-swap (Econet), header x-webhook-secret. */
+export interface SimSwapHookBody { msisdn: string; swappedAt: string }
+
+/**
+ * The app's SIM watch (Android): the bound phone compares its SIMs with the one EcoCash was set up with, each time
+ * the app comes to the front. It reports a change once (and 'sim_ok' when the same SIM card is back).
+ * - sim_changed: a different SIM card is where the EcoCash SIM was (Android gives each card its own id)
+ * - sim_removed: the EcoCash SIM is not in the phone
+ * - no_service: the EcoCash SIM is in but has had no network for `minutes` (what a victim's phone sees after a swap)
+ */
+export type SimSignal = 'sim_changed' | 'sim_removed' | 'no_service' | 'sim_ok'
+/** POST /v1/me/sim-signal */
+export interface SimSignalBody {
+  signal: SimSignal
+  /** When the phone first saw it. */
+  since: string
+  /** no_service: for how long, in minutes. */
+  minutes?: number
+  sims: { slot: number; mcc: string | null; mnc: string | null; carrier: string | null; inService: boolean | null }[]
+}
+/** POST /v1/me/sim-signal and GET /v1/me/sim-swap */
+export interface SimSignalResult {
+  /** Econet's network confirmed a recent swap. */
+  confirmed: boolean
+  /** Money leaving EcoCash and large payments are held. */
+  held: boolean
+  heldUntil: string | null
+  /** A swap this phone reported is still open (the SIM isn't back and staff haven't cleared it). */
+  deviceOpen: boolean
+}
+/** No network for this long before the app warns and reports it. Placeholder until ETL decides. */
+export const SIM_NO_SERVICE_MINUTES = 30
+
+// ---------- security (CBL/LCA DFS Security Guidelines) ----------
+
+/** The terms of use and privacy notice a customer accepts when setting up a phone (3.2.5); bump when the text changes. */
+export const TERMS_VERSION = '2026-11-draft'
+
+/** POST /v1/auth/report-lost (no session): sign every phone out of this wallet. The wallet's PIN proves it is the owner. */
+export interface ReportLostBody { msisdn: string; pin: string }
+
+/**
+ * POST /v1/me/pay-biometric { pin } → { token }: fingerprint or face for payments. The app keeps the token in the
+ * phone's keystore behind the biometric prompt (expo-secure-store requireAuthentication) and sends it instead of the PIN.
+ * DELETE /v1/me/pay-biometric turns it off. New fingerprints on the phone make the stored token unreadable.
+ */
+export interface PayBiometricToken { token: string }
+/** The PIN field accepts a payment biometric token: "B." + 43 characters. */
+export const PAY_BIOMETRIC_PREFIX = 'B.'
+
+/** Sign-in and PIN events, for staff to review (guidelines 3.2.5b-vi). GET /admin/v1/users/:id/auth-events */
+export type AuthEventKind =
+  | 'login' | 'login_failed' | 'pin_wrong' | 'pin_locked' | 'idle_signout' | 'expired_signout'
+  | 'reported_lost' | 'device_removed' | 'pay_biometric_on' | 'pay_biometric_off' | 'rate_limited'
+  | 'unusual_context' | 'device_mismatch' | 'unlock_failed' | 'pin_ok' | 'auth_attack' | 'sim_signal'
+  | 'codes_email_on' | 'codes_email_off'
+export interface AuthEvent { id: string; kind: AuthEventKind; app: string | null; ip: string | null; detail: string | null; createdAt: string }
+export const AUTH_EVENT_LABEL: Record<AuthEventKind, string> = {
+  login: 'Signed in',
+  login_failed: 'Sign-in refused',
+  pin_wrong: 'Wrong PIN',
+  pin_locked: 'PIN locked',
+  idle_signout: 'Signed out after no use',
+  expired_signout: 'Session expired',
+  reported_lost: 'Phone reported lost',
+  device_removed: 'Phone removed by the customer',
+  pay_biometric_on: 'Fingerprint for payments turned on',
+  pay_biometric_off: 'Fingerprint for payments turned off',
+  rate_limited: 'Too many attempts',
+  unusual_context: 'Unusual phone or place',
+  device_mismatch: 'Phone details did not match: set up again',
+  unlock_failed: 'App unlock refused',
+  pin_ok: 'PIN checked',
+  auth_attack: 'Part of a sign-in attack (many wallets, one address)',
+  sim_signal: 'Phone reported a SIM change or no network',
+  codes_email_on: 'Sign-in codes by email turned on (travelling)',
+  codes_email_off: 'Sign-in codes by email turned off',
+}
+
+/**
+ * The phone's context, sent by the apps with every request (header x-device-context: base64url JSON) so the server
+ * can bind on more than one property and flag a bound phone that suddenly looks or sits elsewhere (DFS guidelines
+ * 3.2.3a/b). Location only when the person already allowed it, rounded to about 10 km; never asked for here.
+ */
+export interface DeviceContext {
+  net: 'cellular' | 'wifi' | 'other' | 'none'
+  /** Mobile network name of the default SIM, when known. */
+  carrier?: string | null
+  /** Screen in physical pixels, "1080x2340". */
+  screen: string
+  /** "android 15" */
+  os: string
+  model: string
+  /** IANA time zone, e.g. Africa/Maseru. */
+  tz: string
+  /** [lat, lng] rounded to 0.1°, when location permission was already given. */
+  loc?: [number, number] | null
+  /** On Wi-Fi: whether the network has a password (open = anyone nearby can join or imitate it). */
+  wifi?: 'open' | 'secured' | null
+}
+export const DEVICE_CONTEXT_HEADER = 'x-device-context'
+/**
+ * Set on a response when the bound phone's request came over a network it hasn't used before (a new address range);
+ * the app then asks the person before continuing (DFS guidelines 3.2.4i).
+ */
+export const NETWORK_NEW_HEADER = 'x-network-new'
+/** SMS codes end with this app's hash line so Android can hand the code to the app (SMS Retriever, guidelines 3.2.5b-iv). */
+export const SMS_CODE_PREFIX = '<#>'
+
+/** What the server learned about a bound phone (portal: user panel › Phones). */
+export interface DeviceProfileSummary { screens: string[]; nets: string[]; carriers: string[]; timeZones: string[]; areas: number; seen: number }
+
+/** GET /admin/v1/auth-monitor?days=7: sign-in monitoring for staff (DFS guidelines 3.2.5b-vi). */
+export interface AuthMonitor {
+  days: number
+  /** Per Maseru day, newest first: counts per event kind. */
+  byDay: { day: string; counts: Partial<Record<AuthEventKind, number>> }[]
+  totals: Partial<Record<AuthEventKind, number>>
+  /** Addresses with the most refused sign-ins, and how many wallets they tried. */
+  topAddresses: { ip: string; failures: number; wallets: number; lastAt: string }[]
+  /** Wallets with the most wrong PINs and locks. */
+  topWallets: { user: PublicUser; failures: number; locks: number; lastAt: string }[]
+  recent: (AuthEvent & { user: PublicUser | null; admin: string | null })[]
 }

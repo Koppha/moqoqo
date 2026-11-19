@@ -41,7 +41,12 @@
           "version": "28.2.13676358"
         }
       ],
-      "expo-secure-store",
+      [
+        "expo-secure-store",
+        {
+          "faceIDPermission": "Allow $(PRODUCT_NAME) to use Face ID to approve payments and unlock your wallet."
+        }
+      ],
       [
         "expo-image-picker",
         {

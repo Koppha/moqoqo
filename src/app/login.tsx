@@ -16,6 +16,7 @@ import { APP } from '../lib/variant'
 import { useAuth } from '../state/Auth'
 import { useAppState } from '../state/AppState'
 import { localNumber, USERNAME_PATTERN } from '../../shared/api'
+import { smsAppHash } from '../../modules/sms-retriever'
 import { esGradients } from '../miniapps/ecosure/theme'
 import { colors, gradients, radius } from '../theme'
 import { useKeyboardScroll } from '../components/useKeyboardScroll'
@@ -218,6 +219,12 @@ export default function Login() {
                 <Text style={[l.changeLink, { textAlign: 'center' }]}>{starting ? t.setup.checking : t.auth.createProfile}</Text>
               </Pressable>
             )}
+            {/* Sign the wallet out of every phone with the number and PIN (DFS guidelines 3.2.8d). */}
+            {!ECOSURE && (
+              <Pressable accessibilityRole="button" onPress={() => router.push('/lost-phone')} style={{ alignSelf: 'center', paddingVertical: 12 }}>
+                <Text style={[l.changeLink, { textAlign: 'center' }]}>{t.lost.link}</Text>
+              </Pressable>
+            )}
             <Text style={l.demo}>{demo}</Text>
           </View>
         ) : (
@@ -246,6 +253,8 @@ export default function Login() {
           <Switch value={simulate} onValueChange={async (on) => { await setSimulateEconet(on); setSimulate(on); recheck() }}
             trackColor={{ true: colors.primary, false: colors.border }} thumbColor="#fff" accessibilityLabel={t.setup.simulate} />
         </View>
+        {/* Test builds: the hash sign-up SMS codes must end with for this build to read them by itself (SMS Retriever). */}
+        {serverOpen && smsAppHash() && <Text selectable style={[l.serverHint, { marginTop: 12, marginBottom: 0 }]}>SMS app hash: {smsAppHash()}</Text>}
       </Sheet>
     </KeyboardAvoidingView>
   )

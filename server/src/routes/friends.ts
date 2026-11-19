@@ -3,7 +3,8 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import type { Me, UserRelation } from '../../../shared/api'
 import type { Ctx } from '../context'
-import { notFound } from '../errors'
+import { forbidden, notFound } from '../errors'
+import { blockBetween, blockUser, listBlocks, unblockUser } from '../services/blocks'
 import { authUser, noContent, parse, zId } from '../http'
 import {
   answerMessageRequest,
@@ -54,8 +55,21 @@ export async function friendRoutes(app: FastifyInstance, ctx: Ctx) {
     const id = idParam(req.params)
     const [u] = await ctx.db.query<UserRow>(`SELECT * FROM users WHERE id = $1 AND kind = 'person' AND status = 'active'`, [id])
     if (!u) throw notFound('This QR code isn’t a person on EcoCash')
-    return { user: toPublicUser(u), relation: await relationOf(ctx.db, req.user.id, u.id) }
+    const relation = await relationOf(ctx.db, req.user.id, u.id)
+    return (await blockBetween(ctx.db, req.user.id, u.id)) === 'i_blocked' ? { user: toPublicUser(u), relation, blockedByMe: true } : { user: toPublicUser(u), relation }
   })
+
+  // Blocking people (customers block customers). The blocked person is never told.
+  const customerOnly = (u: UserRow) => {
+    if (u.role !== 'customer') throw forbidden('Blocking is for personal wallets')
+  }
+  app.get('/v1/blocks', auth, async (req) => listBlocks(ctx.db, req.user.id))
+  app.post('/v1/blocks', auth, async (req) => {
+    customerOnly(req.user)
+    const { userId } = parse(z.object({ userId: zId }), req.body)
+    return blockUser(ctx, req.user, userId)
+  })
+  app.delete('/v1/blocks/:id', auth, async (req) => unblockUser(ctx, req.user, idParam(req.params)))
 
   app.post('/v1/contacts/match', auth, async (req) => {
     const { msisdns } = parse(z.object({ msisdns: z.array(z.string().max(30)).max(1000) }), req.body)

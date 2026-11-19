@@ -1,0 +1,2 @@
+int string ecocash_hce_description 0x0
+int xml ecocash_apdu_service 0x0

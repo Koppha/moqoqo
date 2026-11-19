@@ -3,5 +3,8 @@
     package="com.moqoqo.deviceintegrity" >
 
     <uses-sdk android:minSdkVersion="24" />
+    <!-- Wi-Fi security (open or secured) for the new/unsecured network prompt; no location, no network names. -->
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
 </manifest>

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Our own application ID (proprietary, F0…), category "other": no clash with Google Wallet, no default-app setting.
+     requireDeviceUnlock: a locked phone in a pocket never answers. -->
+<host-apdu-service xmlns:android="http://schemas.android.com/apk/res/android"
+  android:description="@string/ecocash_hce_description"
+  android:requireDeviceUnlock="true">
+  <aid-group android:category="other" android:description="@string/ecocash_hce_description">
+    <aid-filter android:name="F045434F43415348" />
+  </aid-group>
+</host-apdu-service>

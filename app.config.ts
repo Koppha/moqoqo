@@ -64,7 +64,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
         : 'Allow $(PRODUCT_NAME) to scan QR codes to pay.',
       recordAudioAndroid: false,
     }] as [string, object],
-    ...(business ? [['react-native-nfc-manager', { nfcPermission: 'Allow $(PRODUCT_NAME) to read EcoCash cards to take payments.' }] as [string, object]] : []),
+    ...(business ? [['react-native-nfc-manager', { nfcPermission: 'Allow $(PRODUCT_NAME) to read customers’ phones to take payments.' }] as [string, object]] : []),
     // Pick people from the phone's contacts (Send money, phone-number fields).
     ['expo-contacts', { contactsPermission: 'Allow $(PRODUCT_NAME) to open your contacts so you can pick who to pay.' }] as [string, object],
     // Long-press the app icon: Money / Scan / My QR code (customers), role-specific actions (business).

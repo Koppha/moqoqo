@@ -1,4 +1,5 @@
 // Pay merchant: the customer's one-time payment code (Quick Pay), and paying a person by their receive QR.
+import { assertCanReach } from './blocks'
 import {
   PAYCODE_DIGITS,
   PAYCODE_TTL_SECONDS,
@@ -101,8 +102,10 @@ async function requirePayee(q: Queryable, id: string): Promise<UserRow> {
   return u
 }
 
-export async function payee(ctx: Ctx, id: string): Promise<Payee> {
+/** Scanning a person's receive QR: who they are. A block between the two shows here, before an amount or PIN. */
+export async function payee(ctx: Ctx, id: string, me: UserRow): Promise<Payee> {
   const u = await requirePayee(ctx.db, id)
+  await assertCanReach(ctx.db, me.id, u.id)
   return { id: u.id, name: u.name, maskedMsisdn: mask(u.msisdn!) }
 }
 
@@ -113,6 +116,8 @@ export async function payPerson(ctx: Ctx, me: UserRow, body: PayPersonBody): Pro
   if (note && note.length > 140) throw validation('note must be at most 140 characters')
   const to = await requirePayee(ctx.db, body.toUserId)
   if (to.id === me.id) throw validation('You cannot pay yourself')
+  // Before any money moves: the chat may exist already, so ensurePairChat wouldn't check.
+  await assertCanReach(ctx.db, me.id, to.id)
   await checkPin(ctx.db, me, body.pin)
   return ctx.tx(async (q, out) => {
     const { chatId } = await ensurePairChat(q, out, me.id, to.id, { creatorId: me.id })

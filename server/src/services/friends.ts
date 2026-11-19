@@ -1,4 +1,5 @@
 // Friends, message requests, SMS invites and group invites. Contract: shared/api.ts "friends, invites, groups".
+import { assertCanReach } from './blocks'
 import {
   GROUP_MAX_MEMBERS,
   INVITES_PER_DAY,
@@ -101,6 +102,7 @@ async function findPerson(q: Queryable, body: FriendRequestBody): Promise<UserRo
 export async function requestFriend(ctx: Ctx, me: UserRow, body: FriendRequestBody): Promise<FriendRequest | { accepted: true }> {
   const other = await findPerson(ctx.db, body)
   if (other.id === me.id) throw validation('That’s you')
+  await assertCanReach(ctx.db, me.id, other.id)
   return ctx.tx(async (q, out) => {
     const relation = await relationOf(q, me.id, other.id)
     if (relation === 'friend') throw conflict(`You and ${displayName(other)} are already friends`)

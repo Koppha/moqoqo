@@ -63,14 +63,14 @@ describe('agents', () => {
   })
 
   it('registers a KYC tier 1 customer who can then log in', async () => {
-    const r = await t.call('POST', '/v1/agent/register', { msisdn: '+26662444555', name: 'Neo Mohapi', pin: '4321' }, agent.token)
+    const r = await t.call('POST', '/v1/agent/register', { msisdn: '+26662444555', name: 'Neo Mohapi', pin: '4826' }, agent.token)
     expect(r.status).toBe(201)
     expect(r.body).toMatchObject({ msisdn: '+26662444555', name: 'Neo Mohapi', role: 'customer' })
-    const login = await t.login('+26662444555', 'customer', '4321')
+    const login = await t.login('+26662444555', 'customer', '4826')
     expect(login.user.kycTier).toBe(1)
     expect(login.user.balance).toBe(0)
-    expect((await t.call('POST', '/v1/agent/register', { msisdn: '+26662444555', name: 'Again', pin: '4321' }, agent.token)).body.error.code).toBe('CONFLICT')
-    expect((await t.call('POST', '/v1/agent/register', { msisdn: '12345', name: 'Bad', pin: '4321' }, agent.token)).body.error.code).toBe('VALIDATION')
+    expect((await t.call('POST', '/v1/agent/register', { msisdn: '+26662444555', name: 'Again', pin: '4826' }, agent.token)).body.error.code).toBe('CONFLICT')
+    expect((await t.call('POST', '/v1/agent/register', { msisdn: '12345', name: 'Bad', pin: '4826' }, agent.token)).body.error.code).toBe('VALIDATION')
   })
 })
 

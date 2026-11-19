@@ -7,7 +7,8 @@ import { N, startTestServer, type TestServer } from './helpers'
 let t: TestServer
 const sms = new MockSms()
 const econet: NetworkCheck = { type: 'cellular', sims: [{ mcc: '651', mnc: '02', carrier: 'Econet Telecom Lesotho' }] }
-const phone = (id: string, model = 'Pixel 7'): DeviceInfo => ({ deviceId: id, platform: 'android', model, osVersion: '15', appVersion: '1.0.0' })
+// A phone that reports its integrity (the app always does; rooted phones are blocked by default).
+const phone = (id: string, model = 'Pixel 7'): DeviceInfo => ({ deviceId: id, platform: 'android', model, osVersion: '15', appVersion: '1.0.0', integrity: { rooted: false, developerMode: false, emulator: false } })
 const login = (device: DeviceInfo, network: NetworkCheck = econet, msisdn = N.lerato, app: AppKind = 'customer') =>
   t.call('POST', '/v1/auth/login', { msisdn, pin: '1234', app, device, network })
 
@@ -20,7 +21,7 @@ async function signUp(device: DeviceInfo, idNumber = '9001010001', who = { dob: 
   expect(ha.status).toBe(200)
   const sent = await t.call('POST', `/v1/onboarding/${id}/confirm`, { nameConfirmed: true, ...who })
   expect(sent.status).toBe(200)
-  const done = await t.call('POST', `/v1/onboarding/${id}/verify`, { otp: sent.body.devCode })
+  const done = await t.call('POST', `/v1/onboarding/${id}/verify`, { otp: sent.body.devCode, acceptTerms: true })
   expect(done.status).toBe(200)
   return { id, ha: ha.body, sent: sent.body, token: done.body.token as string }
 }
@@ -90,7 +91,8 @@ describe('sign-up on a phone', () => {
     await t.call('POST', `/v1/onboarding/${id}/identity`, { idNumber: '9001010001' })
     const sent = await t.call('POST', `/v1/onboarding/${id}/confirm`, { nameConfirmed: true, dob: '1990-01-01', gender: 'female' })
     const wrong = sent.body.devCode === '000000' ? '111111' : '000000'
-    expect((await t.call('POST', `/v1/onboarding/${id}/verify`, { otp: wrong })).status).toBe(400)
+    expect((await t.call('POST', `/v1/onboarding/${id}/verify`, { otp: sent.body.devCode })).body.error.code).toBe('TERMS_REQUIRED')
+    expect((await t.call('POST', `/v1/onboarding/${id}/verify`, { otp: wrong, acceptTerms: true })).status).toBe(400)
     expect((await t.call('POST', `/v1/onboarding/${id}/resend`)).status).toBe(400) // too soon
   })
 
@@ -109,12 +111,12 @@ describe('sign-up on a phone', () => {
 
   it('staff see the phones and can remove one', async () => {
     const admin = await t.adminLogin()
-    const me = await t.call('GET', '/v1/me', undefined, (await login(phone('phone-2'))).body.token)
+    const me = await t.call('GET', '/v1/me', undefined, (await login(phone('phone-2', 'Galaxy A15'))).body.token)
     const list = await t.call('GET', `/admin/v1/users/${me.body.id}/devices`, undefined, admin)
     const active = list.body.find((d: any) => !d.unboundAt)
     const after = await t.call('POST', `/admin/v1/users/${me.body.id}/devices/${active.id}/unbind`, undefined, admin)
     expect(after.body.find((d: any) => d.id === active.id).unboundReason).toBe('removed_by_staff')
-    expect((await login(phone('phone-2'))).status).toBe(202) // must sign up again
+    expect((await login(phone('phone-2', 'Galaxy A15'))).status).toBe(202) // must sign up again
   })
 
   it('the EcoSure app has its own binding: setting it up leaves EcoCash Super App signed in', async () => {
@@ -124,8 +126,8 @@ describe('sign-up on a phone', () => {
     expect((await t.call('GET', '/v1/me', undefined, moqoqo.token)).status).toBe(200)
     const devices = (await t.call('GET', '/v1/me/devices', undefined, ecosure.token)).body
     expect(devices.filter((d: any) => !d.unboundReason).map((d: any) => d.app).sort()).toEqual(['customer', 'ecosure'])
-    expect(sms.sent.some((s) => s.text.startsWith('EcoSure: your code is'))).toBe(true)
-    expect((await loginWith('2580', phone('phone-3-ecosure'), 'ecosure')).status).toBe(200)
+    expect(sms.sent.some((s) => s.text.includes('EcoSure: your code is'))).toBe(true)
+    expect((await loginWith('2580', phone('phone-3-ecosure', 'Pixel 8'), 'ecosure')).status).toBe(200)
   })
 })
 
@@ -196,13 +198,14 @@ describe('device security (portal: Settings › Device security)', () => {
     return t.call('PUT', '/admin/v1/app-config', { announcement: current.announcement, minVersion: current.minVersion, deviceSecurity: { blockRooted, blockDeveloperMode } }, admin)
   }
   const signIn = (integrity?: object) =>
-    t.call('POST', '/v1/auth/login', { msisdn: N.lerato, pin: '1234', app: 'customer', device: { ...phone('phone-3', 'Pixel 8'), ...(integrity ? { integrity } : {}) }, network: econet })
+    t.call('POST', '/v1/auth/login', { msisdn: N.lerato, pin: '1234', app: 'customer', device: { ...phone('phone-3', 'Pixel 8'), integrity }, network: econet })
 
-  it('is off until an admin turns it on, and the apps are told', async () => {
-    expect((await t.call('GET', '/v1/app-config')).body.deviceSecurity).toEqual({ blockRooted: false, blockDeveloperMode: false })
-    expect((await signIn({ ...clean, rooted: true, developerMode: true })).status).toBe(200)
-    expect((await setPolicy(true, true)).body.deviceSecurity).toEqual({ blockRooted: true, blockDeveloperMode: true })
-    expect((await t.call('GET', '/v1/app-config')).body.deviceSecurity).toEqual({ blockRooted: true, blockDeveloperMode: true })
+  it('blocks rooted phones by default; developer mode only once an admin turns it on; the apps are told', async () => {
+    expect((await t.call('GET', '/v1/app-config')).body.deviceSecurity).toMatchObject({ blockRooted: true, blockDeveloperMode: false, requireSimMatch: true, idleMinutes: 15 })
+    expect((await signIn({ ...clean, rooted: true })).body.error.code).toBe('DEVICE_BLOCKED')
+    expect((await signIn({ ...clean, developerMode: true })).status).toBe(200)
+    expect((await setPolicy(true, true)).body.deviceSecurity).toMatchObject({ blockRooted: true, blockDeveloperMode: true, requireSimMatch: true })
+    expect((await t.call('GET', '/v1/app-config')).body.deviceSecurity).toMatchObject({ blockRooted: true, blockDeveloperMode: true })
   })
 
   it('refuses rooted phones, developer mode and apps too old to report', async () => {

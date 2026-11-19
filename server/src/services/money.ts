@@ -1,5 +1,6 @@
 // Every money movement: one DB transaction, wallets locked by the ledger, a ledger row, chat messages,
 // and realtime events delivered after COMMIT.
+import { assertCanReach } from './blocks'
 import {
   NO_PIN_TAP_LIMIT,
   type BillKey,
@@ -33,7 +34,7 @@ import { normalizeMsisdn } from '../lib/msisdn'
 import type { Outbox } from '../realtime/outbox'
 import { BILLERS, billerAccount, lecTokenText, parseBill, vendLecToken } from './billers'
 import { announceUpdate, ensurePairChat, loadMessages, postMessage, requireMember } from './chats'
-import { checkPin, parsePin } from './pins'
+import { checkPin, checkStrongPin, parsePin } from './pins'
 import { declineShare, payShareNow } from './splits'
 import { recordBlocked, RiskBlocked } from './risk'
 import { toTransaction } from './transactions'
@@ -77,8 +78,10 @@ export interface PayOptions { pinConfirmed?: boolean }
 export async function sendMoney(ctx: Ctx, me: UserRow, body: SendMoneyBody, opts: PayOptions = {}): Promise<MoneyResult> {
   const amountCents = paymentCents(body.amount)
   const note = clean(body.note, 140, 'note')
-  await requireMember(ctx.db, body.chatId, me.id)
+  const chat = await requireMember(ctx.db, body.chatId, me.id)
   if (body.toUserId === me.id) throw validation('You cannot send money to yourself')
+  // Before any money moves (the live ledger can't be rolled back): one to one, a block stops it.
+  if (chat.kind === 'direct') await assertCanReach(ctx.db, me.id, body.toUserId)
   const [member] = await ctx.db.query<{ kind: string }>(
     'SELECT u.kind FROM chat_members cm JOIN users u ON u.id = cm.user_id WHERE cm.chat_id = $1 AND cm.user_id = $2',
     [body.chatId, body.toUserId],
@@ -141,6 +144,7 @@ export async function sendMany(ctx: Ctx, me: UserRow, body: SendManyBody): Promi
       if (user.id === me.id) throw validation('You cannot send money to yourself')
       if (seen.has(user.id)) throw validation(`${displayName(user)} is already in this list`)
       seen.add(user.id)
+      await assertCanReach(ctx.db, me.id, user.id)
       const payee = user
       const paid = await ctx.tx(async (q, out) => {
         const { chatId } = await ensurePairChat(q, out, me.id, payee.id, { creatorId: me.id })
@@ -424,7 +428,9 @@ export async function registerCustomer(ctx: Ctx, agent: UserRow, body: RegisterC
   const msisdn = normalizeMsisdn(body.msisdn)
   const name = clean(body.name, 60, 'name')
   if (!name) throw validation('name is required')
-  const { hash, salt } = await hashSecret(parsePin(body.pin))
+  const newPin = parsePin(body.pin)
+  checkStrongPin(newPin) // the customer chooses it; easy PINs are refused (DFS guidelines 3.2.5b-ii)
+  const { hash, salt } = await hashSecret(newPin)
   return ctx.tx(async (q) => {
     const [exists] = await q.query('SELECT 1 FROM users WHERE msisdn = $1', [msisdn])
     if (exists) throw conflict(`${msisdn} already has a wallet`)

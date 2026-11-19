@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import { Link } from 'react-router'
-import { MAX_TRANSACTION, type AppConfig, type AppConfigBody, type ContactSettings, type Tariff } from '../../../shared/api'
+import { DEFAULT_DEVICE_SECURITY, MAX_TRANSACTION, SECURITY_LIMITS, type AppConfig, type AppConfigBody, type ContactSettings, type Tariff } from '../../../shared/api'
 import { api, errorMessage } from '../api'
 import { useAuth } from '../auth'
 import { useToast } from '../components/Toast'
@@ -21,8 +21,20 @@ interface Values {
   society: string
   blockRooted: boolean
   blockDeveloperMode: boolean
+  requireSimMatch: boolean
+  idleMinutes: string
+  sessionDays: string
+  maxPinAttempts: string
+  pinLockMinutes: string
 }
-type Errors = Partial<Record<'en' | 'st' | 'customer' | 'business' | 'ecosure' | 'society', string>>
+type SecurityKey = 'idleMinutes' | 'sessionDays' | 'maxPinAttempts' | 'pinLockMinutes'
+type Errors = Partial<Record<'en' | 'st' | 'customer' | 'business' | 'ecosure' | 'society' | SecurityKey, string>>
+const SECURITY_FIELDS: { key: SecurityKey; label: string; hint: string }[] = [
+  { key: 'idleMinutes', label: 'Sign out after no use (minutes)', hint: 'Apps and portal. The guidelines allow at most 15.' },
+  { key: 'sessionDays', label: 'Sign in again after (days)', hint: 'Even when the app is in use.' },
+  { key: 'maxPinAttempts', label: 'Wrong PINs before locking', hint: 'Also staff passwords.' },
+  { key: 'pinLockMinutes', label: 'Lock time (minutes)', hint: 'How long a locked PIN or staff account stays locked.' },
+]
 
 export function validateSettings(v: Values): { errors: Errors; body: AppConfigBody | null } {
   const errors: Errors = {}
@@ -34,13 +46,21 @@ export function validateSettings(v: Values): { errors: Errors; body: AppConfigBo
   if (v.business.trim() && !SEMVER.test(v.business.trim())) errors.business = 'Use a version like 1.4.0, or leave empty.'
   if (v.ecosure.trim() && !SEMVER.test(v.ecosure.trim())) errors.ecosure = 'Use a version like 1.4.0, or leave empty.'
   if (v.society.trim() && !SEMVER.test(v.society.trim())) errors.society = 'Use a version like 1.4.0, or leave empty.'
+  for (const f of SECURITY_FIELDS) {
+    const n = Number(v[f.key])
+    const [min, max] = SECURITY_LIMITS[f.key]
+    if (!/^\d+$/.test(v[f.key].trim()) || n < min || n > max) errors[f.key] = `A whole number from ${min} to ${max}.`
+  }
   if (Object.keys(errors).length) return { errors, body: null }
   return {
     errors,
     body: {
       announcement: v.showAnnouncement ? { en: v.en.trim(), st: v.st.trim() } : null,
       minVersion: { customer: v.customer.trim() || null, business: v.business.trim() || null, ecosure: v.ecosure.trim() || null, society: v.society.trim() || null },
-      deviceSecurity: { blockRooted: v.blockRooted, blockDeveloperMode: v.blockDeveloperMode },
+      deviceSecurity: {
+        blockRooted: v.blockRooted, blockDeveloperMode: v.blockDeveloperMode, requireSimMatch: v.requireSimMatch,
+        idleMinutes: Number(v.idleMinutes), sessionDays: Number(v.sessionDays), maxPinAttempts: Number(v.maxPinAttempts), pinLockMinutes: Number(v.pinLockMinutes),
+      },
     },
   }
 }
@@ -56,6 +76,11 @@ function toValues(c: AppConfig): Values {
     society: c.minVersion.society ?? '',
     blockRooted: c.deviceSecurity.blockRooted,
     blockDeveloperMode: c.deviceSecurity.blockDeveloperMode,
+    requireSimMatch: c.deviceSecurity.requireSimMatch ?? true,
+    idleMinutes: String(c.deviceSecurity.idleMinutes ?? DEFAULT_DEVICE_SECURITY.idleMinutes),
+    sessionDays: String(c.deviceSecurity.sessionDays ?? DEFAULT_DEVICE_SECURITY.sessionDays),
+    maxPinAttempts: String(c.deviceSecurity.maxPinAttempts ?? DEFAULT_DEVICE_SECURITY.maxPinAttempts),
+    pinLockMinutes: String(c.deviceSecurity.pinLockMinutes ?? DEFAULT_DEVICE_SECURITY.pinLockMinutes),
   }
 }
 
@@ -100,6 +125,9 @@ function Current({ config }: { config: AppConfig }) {
             {config.deviceSecurity.blockRooted || config.deviceSecurity.blockDeveloperMode
               ? [config.deviceSecurity.blockRooted && 'Rooted and jailbroken phones blocked', config.deviceSecurity.blockDeveloperMode && 'Developer mode blocked'].filter(Boolean).join('; ')
               : <span className="muted">All phones allowed</span>}
+            {' · '}
+            {config.deviceSecurity.requireSimMatch === false ? 'SIM number not checked on new phones' : 'New phones must hold the wallet’s SIM'}
+            {` · sign out after ${config.deviceSecurity.idleMinutes ?? 15} min without use · ${config.deviceSecurity.maxPinAttempts ?? 5} wrong PINs lock for ${config.deviceSecurity.pinLockMinutes ?? 15} min`}
           </dd>
         </div>
         <div>
@@ -203,6 +231,24 @@ function SettingsForm({ config, onSaved }: { config: AppConfig; onSaved: (c: App
           <div className="check-row">
             <input id="block-dev" type="checkbox" checked={v.blockDeveloperMode} onChange={(e) => set('blockDeveloperMode', e.target.checked)} />
             <label htmlFor="block-dev">Block phones with developer options or USB debugging on (Android)</label>
+          </div>
+          <div className="check-row">
+            <input id="require-sim" type="checkbox" checked={v.requireSimMatch} onChange={(e) => set('requireSimMatch', e.target.checked)} />
+            <label htmlFor="require-sim">
+              On a phone’s first sign-in, refuse it when its SIM shows a different number than the wallet’s (Android phones that show
+              their number; Econet’s network check once connected). Off: let it through and mark the phone.
+            </label>
+          </div>
+          <h3 className="form-section">Sessions and PIN lockout</h3>
+          <p className="muted small">
+            CBL/LCA DFS Security Guidelines 3.2.8a and 3.2.5b-v. Changes apply to the next request; people already signed in are signed out once they pass the new limits.
+          </p>
+          <div className="grid-2">
+            {SECURITY_FIELDS.map((f) => (
+              <Field key={f.key} label={f.label} hint={f.hint} error={errors[f.key]}>
+                {(p) => <input {...p} type="number" inputMode="numeric" min={SECURITY_LIMITS[f.key][0]} max={SECURITY_LIMITS[f.key][1]} value={v[f.key]} onChange={(e) => set(f.key, e.target.value)} />}
+              </Field>
+            ))}
           </div>
         </fieldset>
         {serverError && (

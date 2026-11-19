@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import {
+  CODES_BY_EMAIL_MAX_DAYS,
   DEFAULT_NOTIFICATION_PREFS,
   EMAIL_CODE_TTL_SECONDS,
   NOTIFY_CHANNELS,
@@ -17,9 +18,11 @@ import {
 import type { Ctx } from '../context'
 import type { Queryable } from '../db/index'
 import { AppError, validation } from '../errors'
-import { authAdmin, authUser, parse, zPage } from '../http'
+import { authAdmin, authUser, parse, zPage, zPin } from '../http'
 import { hashToken, newId, randomDigits } from '../lib/crypto'
 import { iso } from '../lib/time'
+import { logAuthEvent } from '../services/authLog'
+import { checkPin } from '../services/pins'
 import { getUsers, toPublicUser, type UserRow } from '../services/users'
 import { audit } from './admin'
 
@@ -27,8 +30,10 @@ const MAX_EMAIL_ATTEMPTS = 5
 const codeHash = (userId: string, code: string) => hashToken(`${userId}:${code}`)
 
 async function settings(q: Queryable, userId: string): Promise<NotificationSettings> {
-  const [u] = await q.query<{ email: string | null; verified: boolean; devices: number }>(
-    `SELECT email, email_verified_at IS NOT NULL AS verified, (SELECT count(*)::int FROM devices d WHERE d.user_id = u.id) AS devices FROM users u WHERE id = $1`,
+  const [u] = await q.query<{ email: string | null; verified: boolean; devices: number; codes_until: Date | null }>(
+    `SELECT email, email_verified_at IS NOT NULL AS verified, (SELECT count(*)::int FROM devices d WHERE d.user_id = u.id) AS devices,
+       CASE WHEN codes_by_email_until > now() AND email_verified_at IS NOT NULL THEN codes_by_email_until END AS codes_until
+     FROM users u WHERE id = $1`,
     [userId],
   )
   const rows = await q.query<{ channel: NotifyChannel; category: ChoosableCategory; enabled: boolean }>('SELECT channel, category, enabled FROM notification_prefs WHERE user_id = $1', [userId])
@@ -39,7 +44,7 @@ async function settings(q: Queryable, userId: string): Promise<NotificationSetti
       prefs[channel][category] = rows.find((r) => r.channel === channel && r.category === category)?.enabled ?? DEFAULT_NOTIFICATION_PREFS[channel][category] ?? false
     }
   }
-  return { prefs, email: u?.email ?? null, emailVerified: !!u?.verified, pushDevice: (u?.devices ?? 0) > 0 }
+  return { prefs, email: u?.email ?? null, emailVerified: !!u?.verified, pushDevice: (u?.devices ?? 0) > 0, codesByEmailUntil: u?.codes_until ? iso(u.codes_until) : null }
 }
 
 export async function notificationRoutes(app: FastifyInstance, ctx: Ctx) {
@@ -103,7 +108,8 @@ export async function notificationRoutes(app: FastifyInstance, ctx: Ctx) {
     }
     const previous = req.user.email_verified_at ? req.user.email : null
     await ctx.db.tx(async (q) => {
-      await q.query('UPDATE users SET email = $2, email_verified_at = now() WHERE id = $1', [req.user.id, pending.email])
+      // A new address turns codes by email off: they are turned on again knowingly, with the PIN.
+      await q.query('UPDATE users SET email = $2, email_verified_at = now(), codes_by_email_until = CASE WHEN email = $2 THEN codes_by_email_until END WHERE id = $1', [req.user.id, pending.email])
       await q.query('DELETE FROM email_codes WHERE user_id = $1', [req.user.id])
     })
     void ctx.notifier.send({
@@ -116,8 +122,35 @@ export async function notificationRoutes(app: FastifyInstance, ctx: Ctx) {
     return settings(ctx.db, req.user.id)
   })
 
+  // Travelling abroad: the code for setting up a phone goes to the confirmed email instead of by SMS, until a date.
+  // Off by default; on only from a signed-in phone with the wallet PIN; every change is a security alert.
+  app.put('/v1/me/codes-by-email', auth, async (req) => {
+    const body = parse(z.object({ on: z.boolean(), days: z.number().int().min(1).max(CODES_BY_EMAIL_MAX_DAYS).default(30), pin: zPin.optional() }), req.body)
+    if (body.on) {
+      if (!req.user.email || !req.user.email_verified_at) throw validation('Add and confirm an email address first')
+      await checkPin(ctx.db, req.user, body.pin)
+      const [row] = await ctx.db.query<{ until: Date }>(
+        `UPDATE users SET codes_by_email_until = now() + make_interval(days => $2) WHERE id = $1 RETURNING codes_by_email_until AS until`,
+        [req.user.id, body.days],
+      )
+      const until = row.until.toLocaleDateString('en-GB', { timeZone: 'Africa/Maseru', day: 'numeric', month: 'long', year: 'numeric' })
+      await logAuthEvent(ctx.db, { userId: req.user.id, kind: 'codes_email_on', ip: req.ip, detail: `${req.user.email} until ${until}` })
+      void ctx.notifier.send({
+        userIds: [req.user.id],
+        category: 'security',
+        title: 'Sign-in codes will come by email',
+        body: `Until ${until}, the code for setting up EcoCash Super App on a phone goes to ${req.user.email} instead of by SMS. If this wasn't you, call EcoCash customer care now.`,
+        channels: ['push', 'sms', 'email'],
+      })
+    } else {
+      await ctx.db.query('UPDATE users SET codes_by_email_until = NULL WHERE id = $1', [req.user.id])
+      await logAuthEvent(ctx.db, { userId: req.user.id, kind: 'codes_email_off', ip: req.ip })
+    }
+    return settings(ctx.db, req.user.id)
+  })
+
   app.delete('/v1/me/email', auth, async (req) => {
-    await ctx.db.query('UPDATE users SET email = NULL, email_verified_at = NULL WHERE id = $1', [req.user.id])
+    await ctx.db.query('UPDATE users SET email = NULL, email_verified_at = NULL, codes_by_email_until = NULL WHERE id = $1', [req.user.id])
     await ctx.db.query('DELETE FROM email_codes WHERE user_id = $1', [req.user.id])
     return settings(ctx.db, req.user.id)
   })

@@ -48,7 +48,7 @@ const config: AppConfig = {
   ussd: USSD_DEFAULTS,
   maintenance: null,
   announcement: { en: 'Hello', st: 'Lumela' },
-  minVersion: { customer: '1.2.0', business: null, ecosure: null, society: null }, deviceSecurity: { blockRooted: false, blockDeveloperMode: false },
+  minVersion: { customer: '1.2.0', business: null, ecosure: null, society: null }, deviceSecurity: { blockRooted: false, blockDeveloperMode: false, requireSimMatch: true, idleMinutes: 15, sessionDays: 30, maxPinAttempts: 5, pinLockMinutes: 15 },
   serverTime: NOW.toISOString(),
   branding: { logo: null, miniAppIcons: {} },
   contact: CONTACT_DEFAULTS,

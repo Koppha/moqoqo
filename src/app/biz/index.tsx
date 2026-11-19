@@ -4,6 +4,7 @@ import { useCallback, useState } from 'react'
 import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import type { AgentSummary, MerchantSummary, Transaction as ApiTransaction } from '../../../shared/api'
+import { ShortcutTile } from '../../components/MiniApps'
 import { TxIcon } from '../../components/TxIcon'
 import { NoticeBanners } from '../../components/Maintenance'
 import { useLightStatusBar } from '../../components/useLightStatusBar'
@@ -19,7 +20,8 @@ import { colors, gradients, radius } from '../../theme'
 
 /**
  * Business home: agents see float and today's cash in/out; merchants see today's sales and who still has to pay.
- * Both can take cash out at an ATM (agents from their float, merchants from their takings).
+ * Agents take cash out at an ATM from their float. Merchants cash out (agent or ATM), buy airtime and bundles, pay
+ * other merchants and send to the bank from their takings, and keep their business profile.
  */
 export default function BusinessHome() {
   const t = useT()
@@ -58,9 +60,18 @@ export default function BusinessHome() {
         { icon: 'qr-code-outline', label: t.receive.title, to: '/receive' },
         { icon: 'receipt-outline', label: t.biz.charge, to: '/biz-action/charge' },
         { icon: 'print-outline', label: t.receive.myQr, to: '/my-qr' },
-        { icon: 'cash-outline', label: t.atm.title, to: '/atm' },
-        ...(/taxi/i.test(me.businessName ?? '') ? [{ icon: 'bus-outline' as IconName, label: t.biz.taxi, to: '/taxi' as Href }] : []),
+        // At an agent (pay their code) or a cardless ATM.
+        { icon: 'cash-outline', label: t.biz.cashOut, to: '/cashout' },
       ]
+  // Merchants spend their takings like a wallet: airtime and bundles (theirs or anyone's), another merchant, the bank.
+  const spend: { icon: IconName; color: string; label: string; to: Href }[] = isAgent ? [] : [
+    { icon: 'call', color: '#16A34A', label: t.biz.airtime, to: { pathname: '/service/[id]', params: { id: 'svc-airtime' } } },
+    { icon: 'wifi', color: '#0EA5E9', label: t.biz.bundles, to: { pathname: '/service/[id]', params: { id: 'svc-bundles' } } },
+    { icon: 'storefront', color: '#E8590C', label: t.biz.payMerchant, to: '/pay' },
+    { icon: 'business', color: '#4F46E5', label: t.biz.bank, to: '/bank' },
+    { icon: 'person-circle', color: '#64748B', label: t.biz.profile, to: '/biz-profile' },
+    ...(/taxi/i.test(me.businessName ?? '') ? [{ icon: 'bus' as IconName, color: '#CA8A04', label: t.biz.taxi, to: '/taxi' as Href }] : []),
+  ]
 
   return (
     <ScrollView style={{ flex: 1, backgroundColor: colors.bg }} contentContainerStyle={{ paddingBottom: 24 }}>
@@ -80,6 +91,15 @@ export default function BusinessHome() {
           {actions.map((a) => <ActionButton key={a.label} icon={a.icon} label={a.label} onPress={() => router.push(a.to)} />)}
         </View>
         <NoticeBanners />
+
+        {spend.length > 0 && (
+          <>
+            <SectionTitle title={t.biz.services} />
+            <Card style={s.services}>
+              {spend.map((x) => <ShortcutTile key={x.label} icon={x.icon} color={x.color} label={x.label} onPress={() => router.push(x.to)} />)}
+            </Card>
+          </>
+        )}
 
         {isAgent && agent && (
           <View style={s.tiles}>
@@ -146,6 +166,7 @@ const s = StyleSheet.create({
   sub: { color: colors.heroMuted, fontSize: 13, marginTop: 2 },
   offline: { color: '#FCD34D', fontSize: 12.5, marginTop: 8 },
   actions: { flexDirection: 'row', backgroundColor: colors.surface, marginTop: 16, paddingVertical: 16, paddingHorizontal: 6, borderRadius: radius.lg },
+  services: { flexDirection: 'row', flexWrap: 'wrap', rowGap: 16, paddingVertical: 16, paddingHorizontal: 4 },
   tiles: { flexDirection: 'row', gap: 10, marginTop: 16 },
   tile: { flex: 1, padding: 12, borderRadius: radius.md },
   tileLabel: { fontSize: 11.5, color: colors.muted },

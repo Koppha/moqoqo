@@ -1,4 +1,5 @@
 import type { AssistantAction, BillKey, CauseStatus, ChatKind, NotifyCategory, ChatSummary, Message, MessageKind, RequestInfo, RequestKind, RequestStatus, SplitMethod, SplitMode, SplitShare, SplitShareStatus } from '../../../shared/api'
+import { assertCanReach, blockedByViewer } from './blocks'
 import type { Queryable } from '../db/index'
 import { AppError, conflict, forbidden, notFound, validation } from '../errors'
 import { newId } from '../lib/crypto'
@@ -200,6 +201,7 @@ export async function chatSummaries(q: Queryable, viewerId: string, onlyIds?: st
     byChat.set(m.chat_id, list)
   }
   const lastMessages = new Map((await loadMessages(q, chats.map((c) => c.last_id).filter((x): x is string => !!x))).map((m) => [m.id, m]))
+  const blocked = await blockedByViewer(q, viewerId, members.filter((m) => m.id !== viewerId).map((m) => m.id))
   return chats.map((c) => {
     const users = byChat.get(c.id) ?? []
     const others = users.filter((u) => u.id !== viewerId)
@@ -216,6 +218,7 @@ export async function chatSummaries(q: Queryable, viewerId: string, onlyIds?: st
     if (c.kind === 'official' && others[0]?.biller === 'support') s.support = true
     if (c.request_status === 'pending') s.request = true
     if (c.kind === 'group' && c.created_by) s.createdBy = c.created_by
+    if (c.kind === 'direct' && others[0] && blocked.has(others[0].id)) s.blockedByMe = true
     const last = c.last_id ? lastMessages.get(c.last_id) : undefined
     if (last) s.lastMessage = last
     return s
@@ -291,6 +294,7 @@ export async function ensurePairChat(
     const [existing] = await q.query<{ id: string }>('SELECT id FROM chats WHERE pair_key = $1', [pairKey])
     return { chatId: existing.id, created: false }
   }
+  if (kind === 'direct' && opts.creatorId) await assertCanReach(q, opts.creatorId, opts.creatorId === a ? b : a)
   await q.query('INSERT INTO chat_members (chat_id, user_id) VALUES ($1, $2), ($1, $3)', [id, a, b])
   if (kind === 'direct' && opts.creatorId) {
     const other = opts.creatorId === a ? b : a
@@ -388,6 +392,12 @@ function categoryOf(m: Message, sender: UserRow | undefined): NotifyCategory {
 /** Inserts a message (and its request row), bumps the chat and queues message.created for every member. */
 export async function postMessage(q: Queryable, out: Outbox, nm: NewMessage): Promise<Message> {
   const id = nm.id ?? newId()
+  // One to one, a block (either way) stops everything; groups are unaffected.
+  const [pair] = await q.query<{ other: string }>(
+    `SELECT cm.user_id AS other FROM chats c JOIN chat_members cm ON cm.chat_id = c.id AND cm.user_id <> $2 WHERE c.id = $1 AND c.kind = 'direct'`,
+    [nm.chatId, nm.senderId],
+  )
+  if (pair) await assertCanReach(q, nm.senderId, pair.other)
   await q.query(
     `INSERT INTO messages (id, chat_id, sender_id, client_id, kind, text, amount_cents, note, action, created_at, cause_id)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, COALESCE($10, now()), $11)`,

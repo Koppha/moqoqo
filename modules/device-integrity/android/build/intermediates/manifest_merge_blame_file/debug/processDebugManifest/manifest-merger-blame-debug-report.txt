@@ -3,5 +3,12 @@
 3    package="com.moqoqo.deviceintegrity" >
 4
 5    <uses-sdk android:minSdkVersion="24" />
-6
-7</manifest>
+6    <!-- Wi-Fi security (open or secured) for the new/unsecured network prompt; no location, no network names. -->
+7    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+7-->C:\Users\hatasik\StudioProjects\moqoqo-native\modules\device-integrity\android\src\main\AndroidManifest.xml:3:3-74
+7-->C:\Users\hatasik\StudioProjects\moqoqo-native\modules\device-integrity\android\src\main\AndroidManifest.xml:3:20-71
+8    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+8-->C:\Users\hatasik\StudioProjects\moqoqo-native\modules\device-integrity\android\src\main\AndroidManifest.xml:4:3-77
+8-->C:\Users\hatasik\StudioProjects\moqoqo-native\modules\device-integrity\android\src\main\AndroidManifest.xml:4:20-74
+9
+10</manifest>

@@ -59,6 +59,7 @@ export function toChat(c: ChatSummary, meId: string, messages: ApiMessage[] | un
     group,
     request: !!c.request,
     createdBy: c.createdBy,
+    blockedByMe: !!c.blockedByMe,
     unread: c.unread,
     updatedAt: c.updatedAt,
     lastMessage: c.lastMessage ? toMessage(c.lastMessage, meId, c.members, group) : undefined,
